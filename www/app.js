@@ -1,0 +1,816 @@
+/*
+ * sensors.social Android app (v0.3), screens from the app design
+ * styled by the Brand Family System (Pinout Limited).
+ *   #/              my sensors: one card per device, key reading, status, three small readings
+ *   #/add           add a sensor: set up a new Altruist / scan a QR / paste an address
+ *   #/setup/1..5    Altruist setup: power → sensor Wi-Fi → home Wi-Fi → map → done
+ *                   (steps from the Altruist AI guide v1.13, section 10)
+ *   #/s/<id>        one device: hero reading with a threshold scale, a tile per parameter
+ *   #/s/<id>/<k>    one parameter: chart for 24 h / 7 d / 30 d, lowest / average / highest
+ * Data: RoSeMAN public API, raw readings. Alerts: native AlertsPlugin + WorkManager.
+ */
+"use strict";
+
+const API = "https://roseman.robonomics.network/";
+const SITE = "https://sensors.social/";
+const SAVED_KEY = "ss.saved.v1";
+const ALERTS_KEY = "ss.alerts.v1";
+const SETUP_KEY = "ss.setup.v1";
+const SS58 = /^[1-9A-HJ-NP-Za-km-z]{46,48}$/;
+const SS58_IN_TEXT = /(?:^|[^1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{46,48})(?![1-9A-HJ-NP-Za-km-z])/;
+const OFFLINE_AFTER = 2 * 3600;
+
+// levels: [good up to, fair up to]; above is poor. limit: dashed line on the chart.
+const PARAMS = {
+  pm25: { label: "PM2.5", long: "PM2.5 · fine particles", unit: "µg/m³", dec: 1, levels: [15, 35], limit: 15, limitLabel: "WHO 24 h · 15", zero: true,
+    note: "Fine particles from traffic, smoke and dust. Good up to the WHO 24-hour guideline of 15 µg/m³, fair to 35, poor above." },
+  pm10: { label: "PM10", long: "PM10 · coarse particles", unit: "µg/m³", dec: 1, levels: [45, 100], limit: 45, limitLabel: "WHO 24 h · 45", zero: true,
+    note: "Coarse particles: dust and pollen. Good up to the WHO 24-hour guideline of 45 µg/m³, fair to 100, poor above." },
+  co2: { label: "CO₂", long: "CO₂ · indoor air", unit: "ppm", dec: 0, levels: [800, 1200], limit: 1000, limitLabel: "1000 ppm",
+    note: "Indoor CO₂ shows how stale the air is. Below 800 ppm is fresh, 800–1200 means it is time to air the room, above 1200 is stuffy." },
+  noiseavg: { label: "Noise", unit: "dB", dec: 0, levels: [55, 70], words: ["Quiet", "Busy", "Loud"],
+    note: "Average sound level. Up to 55 dB is a quiet street, 55–70 a busy one, above 70 is loud traffic." },
+  noisemax: { label: "Noise peak", unit: "dB", dec: 0, note: "Loudest moment within each reading interval." },
+  temperature: { label: "Temperature", unit: "°C", dec: 1 },
+  humidity: { label: "Humidity", unit: "%", dec: 0, band: [30, 60, 25, 70], indoorOnly: true,
+    note: "Indoors (Insight), comfortable relative humidity is 30–60 %. Outdoor sensors show it without a rating." },
+  pressure: { label: "Pressure", unit: "hPa", dec: 0, conv: (v) => v * 1.33322,
+    note: "Air pressure at the sensor's altitude, not reduced to sea level." },
+};
+const ORDER = ["pm25", "pm10", "co2", "noiseavg", "noisemax", "temperature", "humidity", "pressure"];
+const MAIN_KEY = ["pm25", "co2", "pm10", "temperature"];
+const PM = ["pm25", "pm10"]; // shown together as the main metric: fine vs coarse tells smoke from dust
+const RANK = { good: 0, fair: 1, poor: 2 };
+const worst = (a, b) => (!a ? b : !b ? a : RANK[a] >= RANK[b] ? a : b);
+const PERIODS = { "24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400 };
+const LEVEL_TEXT = { good: "Good", fair: "Fair", poor: "Poor" };
+const MODEL_NAMES = { urban: "Urban", insight: "Insight" };
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const app = $("#app");
+const now = () => Math.floor(Date.now() / 1000);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const short = (id) => (id.length > 16 ? id.slice(0, 6) + "…" + id.slice(-6) : id);
+const num = (v) => typeof v === "number" && isFinite(v);
+
+const ICON = {
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>',
+  close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"/><path d="M9 4v14M15 6v14"/></svg>',
+  bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+  device: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="3"/><circle cx="12" cy="10" r="3"/><path d="M9 17h6"/></svg>',
+  qr: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 7V4a1 1 0 0 1 1-1h3M17 3h3a1 1 0 0 1 1 1v3M21 17v3a1 1 0 0 1-1 1h-3M7 21H4a1 1 0 0 1-1-1v-3M7 12h10"/></svg>',
+  chev: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>',
+  tick: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
+  info: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/></svg>',
+  wifi: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M2 9a15 15 0 0 1 20 0"/><circle cx="12" cy="19.5" r="1" fill="var(--blue)"/></svg>',
+  lock: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+};
+
+/* ---------- storage ---------- */
+function loadJSON(key, def) { try { return JSON.parse(localStorage.getItem(key)) ?? def; } catch { return def; } }
+function saveJSON(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }
+const saved = () => loadJSON(SAVED_KEY, []);
+const alerts = () => loadJSON(ALERTS_KEY, {});
+const setupState = () => loadJSON(SETUP_KEY, {});
+const setSetup = (patch) => saveJSON(SETUP_KEY, { ...setupState(), ...patch });
+
+/* ---------- data ---------- */
+async function getJSON(path) {
+  const r = await fetch(API + path, { cache: "no-store" });
+  if (!r.ok) throw new Error("RoSeMAN " + r.status);
+  const j = await r.json();
+  return j.result ?? j;
+}
+
+let markersCache = null;
+async function markers() {
+  if (markersCache && now() - markersCache.t < 300) return markersCache.list;
+  const e = now();
+  const list = await getJSON(`api/v2/sensor/markers/${e - 86400}/${e}`);
+  markersCache = { t: e, list: Array.isArray(list) ? list : [] };
+  return markersCache.list;
+}
+const marker = (id) => (markersCache?.list || []).find((m) => m.sensor_id === id) || null;
+
+const seriesCache = new Map();
+async function rows(id, period = "24h") {
+  const key = id + "|" + period;
+  const c = seriesCache.get(key);
+  if (c && now() - c.t < 300) return c.rows;
+  const e = now();
+  let r = await getJSON(`api/v2/sensor/${id}/${e - PERIODS[period]}/${e}`);
+  r = (Array.isArray(r) ? r : []).filter((x) => x && x.data).sort((a, b) => a.timestamp - b.timestamp);
+  seriesCache.set(key, { t: e, rows: r });
+  return r;
+}
+const latestOf = (r) => (r.length ? r[r.length - 1] : null);
+/** Newest reading of a sensor across every loaded period: 24 h and 7 d are fetched at different
+ * times, and the current value must not change when the user switches the chart period. */
+function freshest(id) {
+  let best = null;
+  for (const [k, c] of seriesCache) {
+    if (!k.startsWith(id + "|")) continue;
+    const l = latestOf(c.rows);
+    if (l && (!best || l.timestamp > best.timestamp)) best = l;
+  }
+  return best;
+}
+
+const value = (key, raw) => (PARAMS[key]?.conv ? PARAMS[key].conv(raw) : raw);
+function fmt(key, v) {
+  if (!num(v)) return "—";
+  return v.toFixed(PARAMS[key]?.dec ?? 1);
+}
+/** Model from the markers API; older firmware leaves it empty, then guess from what it measures. */
+function modelOf(id) {
+  const m = marker(id)?.device_model;
+  if (m) return m;
+  const ks = Object.keys(latestOf(seriesCache.get(id + "|24h")?.rows || [])?.data || {});
+  if (ks.includes("noiseavg") || ks.includes("noisemax")) return "urban";
+  if (ks.includes("co2")) return "insight";
+  return "";
+}
+/** Indoor comfort bands (humidity) say nothing about outdoor air, so they apply to Insight only. */
+function level(key, v, id) {
+  const p = PARAMS[key];
+  if (!p || !num(v)) return null;
+  if (p.indoorOnly && id && modelOf(id) !== "insight") return null;
+  if (p.levels) return v <= p.levels[0] ? "good" : v <= p.levels[1] ? "fair" : "poor";
+  if (p.band) {
+    const [lo, hi, lo2, hi2] = p.band;
+    if (v >= lo && v <= hi) return "good";
+    if (v >= lo2 && v <= hi2) return "fair";
+    return "poor";
+  }
+  return null;
+}
+const levelWord = (key, lv) => (PARAMS[key]?.words ? PARAMS[key].words[["good", "fair", "poor"].indexOf(lv)] : LEVEL_TEXT[lv]);
+const labelOf = (key) => PARAMS[key]?.label || key;
+const unitOf = (key) => PARAMS[key]?.unit || "";
+
+function ago(ts) {
+  const m = Math.round((now() - ts) / 60);
+  if (m < 1) return "just now";
+  if (m < 60) return m + " min ago";
+  const h = Math.round(m / 60);
+  return h < 48 ? h + " h ago" : Math.round(h / 24) + " days ago";
+}
+function deviceTitle(id) {
+  const s = saved().find((x) => x.id === id);
+  if (s?.label) return s.label;
+  const m = MODEL_NAMES[modelOf(id)];
+  return m ? "Altruist " + m : "Sensor";
+}
+const deviceName = (id) => `${deviceTitle(id)} · ${short(id)}`;
+function keysOf(rec) {
+  const ks = Object.keys(rec?.data || {});
+  return [...ORDER.filter((k) => ks.includes(k)), ...ks.filter((k) => !ORDER.includes(k))];
+}
+
+/* ---------- navigation: pushState with depth, so in-app Back and Android Back agree ---------- */
+function nav(hash, replace = false) {
+  if (replace) history.replaceState({ d: history.state?.d || 0 }, "", hash);
+  else history.pushState({ d: (history.state?.d || 0) + 1 }, "", hash);
+  render();
+  window.scrollTo(0, 0);
+}
+function back(parent) {
+  if ((history.state?.d || 0) > 0) history.back();
+  else { history.replaceState({ d: 0 }, "", parent); render(); }
+}
+window.addEventListener("popstate", render);
+
+function route() {
+  const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  if (parts[0] === "s" && parts[1]) return { view: parts[2] ? "param" : "device", id: parts[1], key: parts[2] };
+  if (parts[0] === "add") return { view: "add" };
+  if (parts[0] === "setup") return { view: "setup", step: Math.min(5, Math.max(1, parseInt(parts[1] || "1", 10))) };
+  return { view: "home" };
+}
+
+let renderToken = 0;
+function render() {
+  const tok = ++renderToken;
+  const r = route();
+  if (r.view === "device") return renderDevice(r.id, tok);
+  if (r.view === "param") return renderParam(r.id, r.key, tok);
+  if (r.view === "add") return renderAdd(tok);
+  if (r.view === "setup") return renderSetup(r.step, tok);
+  return renderHome(tok);
+}
+const barBack = (label = "Back") => `<button class="icon-btn plain" id="back" aria-label="${label}">${ICON.back}</button>`;
+function setMsg(t, kind = "") { const m = $("#msg"); if (m) { m.textContent = t; m.className = "msg" + (kind ? " " + kind : ""); } }
+
+/* ---------- home ---------- */
+function renderHome(tok) {
+  const items = saved();
+  app.innerHTML = `
+    <div class="brand">
+      <div class="logo"><span class="mark" role="img" aria-label="sensors.social"></span><span class="word" aria-hidden="true"></span></div>
+      <button class="icon-btn" id="map" aria-label="Open the map">${ICON.map}</button>
+    </div>
+    <h1>My sensors</h1>
+    <p class="lead">Air outside, right now</p>
+    <div id="list" style="margin-top:20px">${items.length ? "" : `<div class="card empty">No sensors yet. Set up a new Altruist or follow one that is already on the map.</div>`}</div>
+    <div class="grow"></div>
+    <div class="foot">
+      <button class="btn" id="add">${ICON.plus}Add a sensor</button>
+      <p>New Altruist, an address, or a QR code</p>
+    </div>`;
+  $("#map").onclick = () => { location.href = SITE; };
+  $("#add").onclick = () => nav("#/add");
+
+  const list = $("#list");
+  markers().catch(() => []).then(() => {
+    if (tok !== renderToken) return;
+    for (const item of items) {
+      if (item.kind === "owner") {
+        const head = document.createElement("div");
+        head.className = "owner-head";
+        head.innerHTML = `<b>${esc(item.label || "Owner " + short(item.id))}</b><button class="btn danger sm" data-a="del">Remove</button>`;
+        head.querySelector("[data-a=del]").onclick = () => { removeItem(item.id); render(); };
+        list.appendChild(head);
+        const devs = (markersCache?.list || []).filter((m) => m.owner === item.id);
+        if (!devs.length) {
+          const p = document.createElement("p");
+          p.className = "empty";
+          p.textContent = "No devices of this owner reported in the last 24 hours.";
+          list.appendChild(p);
+        }
+        for (const m of devs) list.appendChild(deviceCard(m.sensor_id, tok));
+      } else {
+        list.appendChild(deviceCard(item.id, tok));
+      }
+    }
+  });
+}
+
+function deviceCard(id, tok) {
+  const b = document.createElement("button");
+  b.className = "card dev-card";
+  b.innerHTML = `<div class="dev-head"><div><b>${esc(deviceTitle(id))}</b><small>${esc(short(id))}</small></div><span class="chip off">…</span></div>
+    <div class="dev-main"><div class="v"><span class="num">—</span><span></span></div><small>Loading…</small></div>`;
+  b.onclick = () => nav("#/s/" + encodeURIComponent(id));
+  rows(id).then((r) => {
+    if (tok !== renderToken) return;
+    b.querySelector(".dev-head b").textContent = deviceTitle(id);
+    const rec = freshest(id) || latestOf(r);
+    const chip = b.querySelector(".chip");
+    const when = b.querySelector(".dev-main small");
+    if (!rec) { chip.textContent = "No data"; when.textContent = "nothing in 24 h"; return; }
+    const offline = now() - rec.timestamp > OFFLINE_AFTER;
+    when.textContent = ago(rec.timestamp);
+    const pm = PM.filter((k) => num(rec.data[k]));
+    const main = pm.length ? pm : [MAIN_KEY.find((k) => num(rec.data[k]))].filter(Boolean);
+    if (main.length) {
+      let lv = null;
+      for (const k of main) lv = worst(lv, offline ? null : level(k, value(k, rec.data[k]), id));
+      chip.className = "chip " + (offline ? "off" : lv || "off");
+      chip.textContent = offline ? "Offline" : lv ? (main.length > 1 ? LEVEL_TEXT[lv] : levelWord(main[0], lv)) : "Online";
+      b.querySelector(".v").outerHTML = `<div class="v2">${main.map((k) => `<div><span class="num">${fmt(k, value(k, rec.data[k]))}</span><small>${esc(labelOf(k))} ${esc(unitOf(k))}</small></div>`).join("")}</div>`;
+    }
+    const key = main[0];
+    const minis = keysOf(rec).filter((k) => !main.includes(k) && num(rec.data[k]) && PARAMS[k] && k !== "noisemax").slice(0, 3);
+    if (minis.length) {
+      const m = document.createElement("div");
+      m.className = "mini";
+      m.innerHTML = minis.map((k) => `<div><small>${esc(labelOf(k))}${unitOf(k) ? ", " + esc(unitOf(k)) : ""}</small><span class="num">${fmt(k, value(k, rec.data[k]))}</span></div>`).join("");
+      b.appendChild(m);
+    }
+  }).catch(() => { if (tok === renderToken) b.querySelector(".dev-main small").textContent = "Could not load"; });
+  return b;
+}
+
+function parseInput(raw) {
+  const s = raw.trim();
+  try {
+    const u = new URL(s);
+    const sensor = u.searchParams.get("sensor"), owner = u.searchParams.get("owner");
+    if (sensor) return { id: sensor.trim(), kind: "sensor" };
+    if (owner) return { id: owner.trim(), kind: "owner" };
+  } catch {}
+  // Wallet QR (substrate:<address>:<genesis>) or any text carrying one address.
+  const m = s.match(SS58_IN_TEXT);
+  return { id: m ? m[1] : s, kind: null };
+}
+async function detect(id) {
+  const list = await markers();
+  if (list.some((m) => m.sensor_id === id)) return "sensor";
+  if (list.some((m) => m.owner === id)) return "owner";
+  if (latestOf(await rows(id))) return "sensor";
+  return null;
+}
+function addItem(id, kind) {
+  const all = saved();
+  if (!all.some((x) => x.id === id)) { all.unshift({ id, kind, label: "" }); saveJSON(SAVED_KEY, all); }
+  if (kind === "sensor") nav("#/s/" + encodeURIComponent(id), true);
+  else nav("#/", true);
+}
+function removeItem(id) {
+  saveJSON(SAVED_KEY, saved().filter((x) => x.id !== id));
+  const a = alerts(); delete a[id]; saveJSON(ALERTS_KEY, a); syncAlerts();
+}
+async function addFromText(text) {
+  const { id, kind } = parseInput(text);
+  if (!SS58.test(id)) { setMsg("This doesn't look like a Robonomics address (46–48 characters, starts with 4).", "err"); return; }
+  if (kind) return addItem(id, kind);
+  setMsg("Looking it up…");
+  try {
+    const k = await detect(id);
+    addItem(id, k || "sensor");
+  } catch (e) {
+    setMsg("Could not reach RoSeMAN: " + e.message, "err");
+  }
+}
+
+/* ---------- add a sensor ---------- */
+function renderAdd() {
+  app.innerHTML = `
+    <div class="bar"><button class="icon-btn plain" id="back" aria-label="Close">${ICON.close}</button></div>
+    <h1>Add a sensor</h1>
+    <p class="lead">Set up a new Altruist, or follow one that is already on the map.</p>
+    <div style="margin-top:22px">
+      <button class="card option primary" id="new"><span class="ic">${ICON.device}</span><span class="tx"><b>Set up a new Altruist</b><small>Wi-Fi and a place on the map · about 5 min</small></span>${ICON.chev}</button>
+      <button class="card option" id="scan"><span class="ic">${ICON.qr}</span><span class="tx"><b>Scan a QR code</b><small>From a sensor page on sensors.social</small></span></button>
+      <form class="card" id="f" autocomplete="off">
+        <label for="q" style="display:block;font-size:17px;font-weight:600">Paste an address</label>
+        <p class="muted" style="margin:2px 0 10px;font-size:13px">Sensor or owner — the app tells which</p>
+        <div class="field"><input id="q" placeholder="4…" spellcheck="false" autocapitalize="off"><button class="btn outline sm" type="submit">Add</button></div>
+      </form>
+    </div>
+    <p class="msg" id="msg"></p>`;
+  $("#back").onclick = () => back("#/");
+  $("#new").onclick = () => { saveJSON(SETUP_KEY, {}); nav("#/setup/1"); };
+  $("#scan").onclick = scanQR;
+  $("#f").onsubmit = (e) => { e.preventDefault(); addFromText($("#q").value); };
+}
+
+/** Google code scanner via @capacitor-mlkit/barcode-scanning: no camera permission needed. */
+async function scanQR() {
+  const BS = window.Capacitor?.Plugins?.BarcodeScanner;
+  if (!BS) { setMsg("QR scanning works in the Android app only.", "err"); return; }
+  try {
+    const { available } = await BS.isGoogleBarcodeScannerModuleAvailable();
+    if (!available) {
+      setMsg("Downloading the scanner from Google Play services…");
+      await BS.installGoogleBarcodeScannerModule();
+      let ok = false;
+      for (let i = 0; i < 60 && !ok; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        ok = (await BS.isGoogleBarcodeScannerModuleAvailable()).available;
+      }
+      if (!ok) { setMsg("Scanner is still downloading — try again in a minute.", "err"); return; }
+    }
+    const { barcodes } = await BS.scan({ formats: ["QR_CODE"] });
+    const raw = barcodes?.[0]?.rawValue || "";
+    if (raw) addFromText(raw); else setMsg("");
+  } catch (e) {
+    const t = String(e?.message || e);
+    // Google code scanner reports Back as "Failed to scan code", not as a cancel.
+    if (/cancel|failed to scan code/i.test(t)) { setMsg(""); return; }
+    setMsg("Scanner error: " + t, "err");
+  }
+}
+
+/* ---------- Altruist setup ---------- */
+async function copy(text, btn) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t); t.select();
+    try { document.execCommand("copy"); } catch {} t.remove();
+  }
+  if (btn) { const old = btn.textContent; btn.textContent = "Copied"; setTimeout(() => (btn.textContent = old), 1500); }
+}
+/** What "Copy as text" on the CONNECTED page gives: pull the home-network IP and the Robonomics address out of it. */
+function parseConnected(text) {
+  const ips = [...String(text).matchAll(/\b(\d{1,3}(?:\.\d{1,3}){3})\b/g)].map((m) => m[1])
+    .filter((ip) => ip !== "192.168.4.1" && ip.split(".").every((n) => +n <= 255));
+  const addr = String(text).match(SS58_IN_TEXT)?.[1] || "";
+  return { ip: ips[0] || "", addr };
+}
+/** Moves a point ~100 m in a random direction: the public map shows the area, not the doorstep. */
+function shift100m(lat, lng) {
+  const a = Math.random() * 2 * Math.PI, d = 100;
+  return [lat + (d * Math.cos(a)) / 111320, lng + (d * Math.sin(a)) / (111320 * Math.cos((lat * Math.PI) / 180))];
+}
+const steps = (n) => `<div class="steps"><button class="icon-btn plain" id="back" aria-label="Back">${ICON.back}</button>
+  <div class="track" role="img" aria-label="Step ${n} of 4">${[1, 2, 3, 4].map((i) => `<span class="${i <= n ? "on" : ""}"></span>`).join("")}</div><small>${n} / 4</small></div>`;
+
+function renderSetup(step) {
+  const st = setupState();
+  const go = (n) => nav("#/setup/" + n);
+  if (step === 1) {
+    app.innerHTML = `${steps(1)}
+      <div class="card illu"><svg width="220" height="180" viewBox="0 0 220 180" fill="none" role="img" aria-label="An Altruist sensor with a USB-C cable going to a wall charger">
+        <rect x="28" y="30" width="78" height="112" rx="16" stroke="var(--text)" stroke-width="2.5"/><circle cx="67" cy="72" r="14" stroke="var(--text)" stroke-width="2.5"/>
+        <path d="M50 112h34M50 122h34" stroke="var(--muted)" stroke-width="2.5" stroke-linecap="round"/><rect x="59" y="142" width="16" height="8" rx="3" fill="var(--blue)"/>
+        <path d="M67 150c0 18 20 20 60 20h20" stroke="var(--blue)" stroke-width="3" stroke-linecap="round"/><rect x="146" y="140" width="46" height="40" rx="10" stroke="var(--text)" stroke-width="2.5"/>
+        <path d="M160 140v-14M178 140v-14" stroke="var(--text)" stroke-width="2.5" stroke-linecap="round"/><path d="M169 152l-5 9h10l-5 9" stroke="var(--blue)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <h1>Plug it in</h1>
+      <p class="lead">Connect the Altruist to a USB-C charger — any phone charger with 5 V / 1 A or more. In about a minute it starts its own Wi-Fi network.</p>
+      <ul class="checks"><li><span>${ICON.tick}</span>Keep your phone close — the next steps happen on it.</li>
+        <li><span>${ICON.tick}</span>Your home Wi-Fi needs a 2.4 GHz band — the sensor cannot join 5 GHz.</li></ul>
+      <div class="grow"></div><div class="foot"><button class="btn" id="next">It’s plugged in</button></div>`;
+    $("#back").onclick = () => back("#/add");
+    $("#next").onclick = () => go(2);
+  } else if (step === 2) {
+    app.innerHTML = `${steps(2)}
+      <h1>Join the sensor’s Wi-Fi</h1>
+      <p class="lead">In your phone’s Wi-Fi settings, connect to the network that starts with <b style="color:var(--text)">Altruist-</b>.</p>
+      <div class="card kv-card">
+        <div class="kv">${ICON.wifi}<div><small>Network</small><b>Altruist-xxxxxxxxx</b></div></div>
+        <div class="kv">${ICON.lock}<div><small>Password</small><span class="num">123456789</span></div><button class="btn outline sm" id="cp">Copy</button></div>
+      </div>
+      <div class="hint">${ICON.info}<span>Your phone may warn that this network has no internet. That’s expected — stay connected.</span></div>
+      <div class="grow"></div>
+      <div class="foot"><button class="btn" id="wifi">Open Wi-Fi settings</button><button class="btn secondary" id="next">I’m connected</button></div>`;
+    $("#back").onclick = () => back("#/setup/1");
+    $("#cp").onclick = (e) => copy("123456789", e.currentTarget);
+    $("#wifi").onclick = async () => {
+      const A = window.Capacitor?.Plugins?.Alerts;
+      if (A?.openWifiSettings) await A.openWifiSettings().catch(() => {});
+    };
+    $("#next").onclick = () => go(3);
+  } else if (step === 3) {
+    app.innerHTML = `${steps(3)}
+      <h1>Connect it to your Wi-Fi</h1>
+      <p class="lead">The sensor’s setup page opens by itself. If it doesn’t, open <b style="color:var(--text)">192.168.4.1</b> in a browser.</p>
+      <ol class="nums">
+        <li><span>1</span><div>In <b>WiFi credentials</b>, pick your home network and type its password.</div></li>
+        <li><span>2</span><div>Leave the sensor checkboxes as they are.</div></li>
+        <li><span>3</span><div>Tap <b>Save configuration and restart</b>.</div></li>
+      </ol>
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap"><span class="tag">CONNECTED</span><span class="muted" style="font-size:13px">tap <b style="color:var(--text)">Copy as text</b> there, then paste here</span></div>
+        <textarea id="conn" placeholder="Paste the device info" spellcheck="false">${esc(st.connected || "")}</textarea>
+        <div class="parsed" id="parsed"></div>
+      </div>
+      <div class="grow"></div>
+      <div class="foot"><button class="btn" id="next">Continue</button>
+        <button class="btn secondary" id="skip">Skip — I’ll add it later</button></div>`;
+    const show = () => {
+      const q = parseConnected($("#conn").value);
+      $("#parsed").innerHTML = `<div><span>IP address</span><span>${q.ip ? esc(q.ip) : "—"}</span></div><div><span>Robonomics address</span><span>${q.addr ? esc(short(q.addr)) : "—"}</span></div>`;
+      const ok = !!(q.ip || q.addr);
+      $("#next").disabled = !ok; $("#next").style.opacity = ok ? "" : ".5";
+      setSetup({ connected: $("#conn").value });
+    };
+    $("#conn").oninput = show;
+    show();
+    $("#back").onclick = () => back("#/setup/2");
+    $("#next").onclick = () => go(4);
+    $("#skip").onclick = () => go(4);
+  } else if (step === 4) {
+    const p = parseConnected(st.connected || "");
+    app.innerHTML = `${steps(4)}
+      <h1>Put it on the map</h1>
+      <p class="lead">Back on your home Wi-Fi, tell the sensor where it stands.</p>
+      <div class="card mapbox"><svg viewBox="0 0 350 170" preserveAspectRatio="xMidYMid slice" fill="none" aria-hidden="true">
+        <path d="M0 40h350M0 90h350M0 140h350M60 0v170M150 0v170M250 0v170" stroke="var(--road)" stroke-width="10"/>
+        <path d="M0 115c80-30 150 10 220-20s100-10 130-30" stroke="var(--line)" stroke-width="14" stroke-linecap="round"/>
+        <circle cx="175" cy="85" r="46" fill="var(--blue)" fill-opacity=".08" stroke="var(--blue)" stroke-opacity=".5" stroke-dasharray="4 5"/>
+        <circle cx="175" cy="85" r="5" fill="var(--muted)"/>
+        <path d="M205 62c0-10 8-17 17-17s17 7 17 17c0 13-17 28-17 28s-17-15-17-28Z" fill="var(--blue)"/><circle cx="222" cy="62" r="6" fill="var(--surface)"/></svg>
+        <span>Pin ~100 m from you</span></div>
+      <label class="lbl" for="coords">Latitude, longitude</label>
+      <div class="field"><input id="coords" placeholder="34.68, 33.04" value="${esc(st.coords || "")}" inputmode="decimal"><button class="btn outline sm" id="cp">Copy</button></div>
+      <label class="check"><input type="checkbox" id="shift" ${st.noShift ? "" : "checked"}>Shift the pin ~100 m — the map is public, the air data stays just as useful</label>
+      <button class="btn outline" id="loc" style="margin-top:6px">Use my location</button>
+      <p class="note">On the sensor page go to <b style="color:var(--text)">Map → GPS &amp; Sensors</b>, paste the coordinates and tap <b style="color:var(--text)">Save configuration and restart</b>.</p>
+      <p class="msg" id="msg"></p>
+      <div class="grow"></div>
+      <div class="foot"><button class="btn" id="open">${p.ip ? "Open the sensor page" : "Paste the CONNECTED info first"}</button>
+        <button class="btn secondary" id="next">I saved it</button></div>`;
+    $("#back").onclick = () => back("#/setup/3");
+    $("#coords").oninput = (e) => setSetup({ coords: e.target.value });
+    $("#shift").onchange = (e) => setSetup({ noShift: !e.target.checked });
+    $("#cp").onclick = (e) => copy($("#coords").value, e.currentTarget);
+    $("#loc").onclick = () => {
+      if (!navigator.geolocation) { setMsg("Location is not available on this phone.", "err"); return; }
+      setMsg("Finding your location…");
+      navigator.geolocation.getCurrentPosition((pos) => {
+        let la = pos.coords.latitude, lo = pos.coords.longitude;
+        if ($("#shift").checked) [la, lo] = shift100m(la, lo);
+        const v = `${la.toFixed(4)}, ${lo.toFixed(4)}`;
+        $("#coords").value = v; setSetup({ coords: v });
+        setMsg("Filled in. Copy it and paste on the sensor page.", "ok");
+      }, (err) => setMsg("Could not get the location: " + err.message, "err"), { enableHighAccuracy: true, timeout: 20000 });
+    };
+    $("#open").onclick = () => {
+      if (!p.ip) { back("#/setup/3"); return; }
+      if ($("#coords").value) copy($("#coords").value);
+      location.href = `http://${p.ip}/`; // not an allowed host: Capacitor hands it to the system browser
+    };
+    $("#next").onclick = () => go(5);
+  } else {
+    const p = parseConnected(st.connected || "");
+    app.innerHTML = `<div class="bar"></div>
+      <div class="done-ic"><svg width="168" height="168" viewBox="0 0 168 168" fill="none" aria-hidden="true">
+        <circle cx="84" cy="84" r="80" stroke="var(--blue)" stroke-opacity=".18" stroke-width="2"/><circle cx="84" cy="84" r="58" stroke="var(--blue)" stroke-opacity=".35" stroke-width="2"/>
+        <circle cx="84" cy="84" r="36" fill="var(--blue2)"/><path d="m70 85 10 10 19-21" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <h1 class="center">You’re on the map</h1>
+      <p class="lead center">The sensor shows up on sensors.social within a few minutes. Thank you for measuring the air for your neighbours.</p>
+      <div class="card" style="margin-top:20px">
+        <label class="lbl" for="robo">Robonomics address from the CONNECTED page</label>
+        <div class="field"><input id="robo" value="${esc(p.addr)}" placeholder="4…" spellcheck="false" autocapitalize="off"></div>
+        <p class="msg" id="msg"></p>
+      </div>
+      <div class="card row-set"><div><b>Alerts</b><small>Poor air, or the sensor goes quiet</small></div>
+        <label class="switch"><input type="checkbox" id="al" checked aria-label="Alerts"><span></span></label></div>
+      <div class="grow"></div>
+      <div class="foot"><button class="btn" id="add">Add to my sensors</button></div>`;
+    const check = async () => {
+      const id = $("#robo").value.trim();
+      if (!SS58.test(id)) { setMsg(""); return; }
+      try {
+        const r = latestOf(await rows(id));
+        setMsg(r ? "First reading " + ago(r.timestamp) : "No readings yet — they appear a few minutes after the restart.", r ? "ok" : "");
+      } catch { setMsg(""); }
+    };
+    $("#robo").oninput = check; check();
+    $("#add").onclick = async () => {
+      const id = $("#robo").value.trim();
+      if (!SS58.test(id)) { setMsg("Paste the Robonomics address (starts with 4).", "err"); return; }
+      const all = saved();
+      if (!all.some((x) => x.id === id)) { all.unshift({ id, kind: "sensor", label: "" }); saveJSON(SAVED_KEY, all); }
+      if ($("#al").checked) await setAlert(id, true);
+      saveJSON(SETUP_KEY, {});
+      history.replaceState({ d: 0 }, "", "#/");
+      nav("#/s/" + encodeURIComponent(id));
+    };
+  }
+}
+
+/* ---------- device ---------- */
+function scaleHTML(key, v) {
+  const p = PARAMS[key];
+  if (!p?.levels) return "";
+  const [g, f] = p.levels, max = f * 1.3, pct = (x) => Math.max(0, Math.min(100, (x / max) * 100));
+  return `<div><div class="scale"><span class="g" style="flex:${g} 1 0"></span><span class="f" style="flex:${f - g} 1 0"></span><span class="p" style="flex:${max - f} 1 0"></span><i style="left:${pct(v)}%"></i></div>
+    <div class="scale-labels"><span style="left:0">0</span><span style="left:${pct(g)}%">${g}${p.limit === g ? " WHO" : ""}</span><span style="left:${pct(f)}%">${f}</span><span style="left:100%"></span></div></div>`;
+}
+
+async function renderDevice(id, tok) {
+  const isSaved = saved().some((x) => x.id === id);
+  const following = !!alerts()[id];
+  app.innerHTML = `
+    <div class="bar">${barBack("Back to my sensors")}<div class="end">
+      <button class="icon-btn ${following ? "on" : ""}" id="bell" aria-label="${following ? "Alerts are on" : "Alerts are off"}" aria-pressed="${following}">${ICON.bell}</button>
+      <button class="icon-btn" id="map" aria-label="Open on map">${ICON.map}</button></div></div>
+    <h1 id="title">${esc(deviceTitle(id))}</h1>
+    <div class="status-line" id="status"><span class="dot"></span><span>Loading… · ${esc(short(id))}</span></div>
+    <div id="hero"></div>
+    <div class="tiles" id="tiles"></div>
+    <div class="card row-set"><div><b>Alerts</b><small>Poor air, or offline for 2 h. Checked about every 15 min.</small></div>
+      <label class="switch"><input type="checkbox" id="alert" ${following ? "checked" : ""} aria-label="Alerts"><span></span></label></div>
+    <div class="btn-row">
+      ${isSaved ? `<button class="btn outline sm" id="rename">Rename</button><button class="btn danger sm" id="del">Remove</button>` : `<button class="btn outline sm" id="save">Save</button>`}
+      ${following ? `<button class="btn outline sm" id="test">Test notification</button>` : ""}
+    </div>
+    <p class="msg" id="msg"></p>`;
+
+  $("#back").onclick = () => back("#/");
+  $("#map").onclick = () => { location.href = `${SITE}?sensor=${encodeURIComponent(id)}`; };
+  const toggle = async (on) => { await setAlert(id, on); render(); };
+  $("#bell").onclick = () => toggle(!following);
+  $("#alert").onchange = (e) => toggle(e.target.checked);
+  if ($("#test")) $("#test").onclick = testNotification;
+  if ($("#save")) $("#save").onclick = () => { const a = saved(); a.unshift({ id, kind: "sensor", label: "" }); saveJSON(SAVED_KEY, a); render(); };
+  if ($("#rename")) $("#rename").onclick = () => {
+    const all = saved(); const it = all.find((x) => x.id === id);
+    const name = prompt("Name", it.label || "");
+    if (name === null) return;
+    it.label = name.trim(); saveJSON(SAVED_KEY, all); syncAlerts(); render();
+  };
+  if ($("#del")) $("#del").onclick = () => { removeItem(id); back("#/"); };
+
+  try {
+    await markers().catch(() => null);
+    const r = await rows(id);
+    if (tok !== renderToken) return;
+    $("#title").textContent = deviceTitle(id);
+    const rec = freshest(id) || latestOf(r);
+    if (!rec) { $("#status").innerHTML = `<span class="dot"></span><span>No readings in the last 24 hours · ${esc(short(id))}</span>`; return; }
+    const offline = now() - rec.timestamp > OFFLINE_AFTER;
+    $("#status").innerHTML = `<span class="dot ${offline ? "poor" : "good"}"></span><span>${offline ? "Offline · last reading " : "Online · updated "}${ago(rec.timestamp)} · ${esc(short(id))}</span>`;
+    const keys = keysOf(rec);
+    const pmKeys = PM.filter((k) => num(rec.data[k]));
+    const heroKeys = pmKeys.length ? pmKeys : [MAIN_KEY.find((k) => num(rec.data[k]) && PARAMS[k]?.levels)].filter(Boolean);
+    if (heroKeys.length) {
+      const h = document.createElement("div");
+      h.className = "card hero";
+      let lvAll = null;
+      const cols = heroKeys.map((k) => {
+        const v = value(k, rec.data[k]);
+        const lv = offline ? null : level(k, v, id);
+        lvAll = worst(lvAll, lv);
+        return `<button class="hero-col" data-k="${k}"><span class="hc-top"><span>${esc(labelOf(k))}</span>${lv ? `<b class="lv-${lv}">${levelWord(k, lv)}</b>` : ""}</span>
+          <span class="v"><span class="num">${fmt(k, v)}</span><span>${esc(unitOf(k))}</span></span>${scaleHTML(k, v)}</button>`;
+      });
+      const title = heroKeys.length > 1 ? "Particulate matter" : PARAMS[heroKeys[0]].long || labelOf(heroKeys[0]);
+      h.innerHTML = `<div class="top"><span>${esc(title)}</span>${lvAll && heroKeys.length > 1 ? `<b class="lv-${lvAll}">${LEVEL_TEXT[lvAll]}</b>` : ""}</div>
+        <div class="hero-cols${heroKeys.length > 1 ? " two" : ""}">${cols.join("")}</div>`;
+      h.querySelectorAll(".hero-col").forEach((c) => (c.onclick = () => nav(`#/s/${encodeURIComponent(id)}/${c.dataset.k}`)));
+      $("#hero").appendChild(h);
+    }
+    const tiles = $("#tiles");
+    // the noise tile already shows the peak
+    for (const k of keys.filter((k) => !heroKeys.includes(k) && !(k === "noisemax" && num(rec.data.noiseavg)))) {
+      const raw = rec.data[k];
+      const t = document.createElement("button");
+      t.className = "tile";
+      if (!num(raw)) {
+        t.classList.add("locked");
+        t.innerHTML = `<div class="t-top"><span>${esc(labelOf(k))}</span></div><div class="t-val">Encrypted — open on the map as the owner</div>`;
+        t.onclick = () => $("#map").click();
+      } else {
+        const v = value(k, raw);
+        const lv = offline ? null : level(k, v, id);
+        const extra = k === "noiseavg" && num(rec.data.noisemax) ? ` · peak ${fmt("noisemax", rec.data.noisemax)}` : "";
+        t.innerHTML = `<div class="t-top"><span>${esc(labelOf(k))}</span>${lv ? `<b class="lv-${lv}">${levelWord(k, lv)}</b>` : ""}</div>
+          <div class="t-val"><span class="num">${fmt(k, v)}</span><span>${esc(unitOf(k))}${extra}</span></div>`;
+        t.onclick = () => nav(`#/s/${encodeURIComponent(id)}/${encodeURIComponent(k)}`);
+      }
+      tiles.appendChild(t);
+    }
+  } catch (e) {
+    if (tok === renderToken) $("#status").innerHTML = `<span class="dot"></span><span>Could not reach RoSeMAN: ${esc(e.message)}</span>`;
+  }
+}
+
+/* ---------- parameter ---------- */
+let period = "24h";
+
+async function renderParam(id, key, tok) {
+  const p = PARAMS[key] || {};
+  app.innerHTML = `
+    <div class="bar">${barBack("Back to the device")}<span class="crumb" id="crumb">${esc(deviceTitle(id))}</span></div>
+    <div class="p-label">${esc(p.long || labelOf(key))}</div>
+    <div class="p-big"><span class="num" id="cur">—</span><span>${esc(unitOf(key))}</span></div>
+    <span class="chip off" id="badge">…</span>
+    <div class="seg" id="seg" role="tablist" aria-label="Period">${Object.keys(PERIODS).map((k) => `<button role="tab" data-p="${k}" aria-selected="${k === period}">${k === "24h" ? "24 h" : k === "7d" ? "7 days" : "30 days"}</button>`).join("")}</div>
+    <figure class="card chart-box" style="margin:0"><div class="chart-read" id="read"><span>&nbsp;</span></div><div id="chart"><p class="loading">Loading…</p></div></figure>
+    <div class="stats" id="stats"></div>
+    <p class="note">${p.note ? esc(p.note) + " " : ""}Raw readings, not corrected for humidity.</p>`;
+
+  $("#back").onclick = () => back("#/s/" + encodeURIComponent(id));
+  $("#seg").querySelectorAll("button").forEach((b) => (b.onclick = () => { period = b.dataset.p; render(); }));
+  const known = freshest(id); // show the number at once; the chart for a longer period takes a second
+  if (known && num(known.data[key])) $("#cur").textContent = fmt(key, value(key, known.data[key]));
+
+  try {
+    await markers().catch(() => null);
+    const r = await rows(id, period);
+    if (tok !== renderToken) return;
+    $("#crumb").textContent = deviceTitle(id);
+    const pts = r.filter((x) => num(x.data[key])).map((x) => [x.timestamp, value(key, x.data[key])]);
+    if (!pts.length) { $("#chart").innerHTML = `<p class="loading">No readings for this period.</p>`; $("#badge").textContent = "No data"; return; }
+    await rows(id).catch(() => null); // make sure 24 h is loaded too, so "now" matches the device screen
+    if (tok !== renderToken) return;
+    const fr = freshest(id);
+    const last = fr && num(fr.data[key]) && fr.timestamp >= pts[pts.length - 1][0] ? [fr.timestamp, value(key, fr.data[key])] : pts[pts.length - 1];
+    const lv = level(key, last[1], id);
+    $("#cur").textContent = fmt(key, last[1]);
+    let text = (lv ? levelWord(key, lv) + " · " : "") + ago(last[0]);
+    if (lv === "good" && p.limit && key.startsWith("pm") && last[1] > 0 && last[1] <= p.limit / 2) {
+      text = `Good · ${Math.floor(p.limit / last[1])}× below the WHO 24 h guideline`;
+    }
+    $("#badge").textContent = text;
+    $("#badge").className = "chip " + (lv || "off");
+    const vals = pts.map((x) => x[1]);
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    $("#stats").innerHTML = [["Lowest", Math.min(...vals)], ["Average", avg], ["Highest", Math.max(...vals)]]
+      .map(([n, v]) => `<div class="card"><small>${n}</small><span class="num">${fmt(key, v)}</span></div>`).join("");
+    drawChart($("#chart"), $("#read"), pts, key, PERIODS[period]);
+  } catch (e) {
+    if (tok === renderToken) $("#chart").innerHTML = `<p class="loading">Could not reach RoSeMAN: ${esc(e.message)}</p>`;
+  }
+}
+
+/** SVG line chart, averaged into buckets; touch or drag to read a value. */
+function drawChart(box, readout, pts, key, span) {
+  const W = 340, H = 190, L = 30, R = 6, T = 10, B = 22;
+  const end = now(), start = end - span;
+  const N = span <= 86400 ? 48 : span <= 7 * 86400 ? 168 : 180;
+  const step = span / N;
+  const buckets = Array.from({ length: N }, () => [0, 0]);
+  for (const [t, v] of pts) {
+    const i = Math.min(N - 1, Math.floor((t - start) / step));
+    if (i >= 0) { buckets[i][0] += v; buckets[i][1]++; }
+  }
+  const series = buckets.map(([s, n], i) => (n ? [start + (i + 0.5) * step, s / n] : null));
+  const vals = series.filter(Boolean).map((x) => x[1]);
+  const p = PARAMS[key] || {};
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (p.zero) lo = 0;
+  if (p.limit && hi < p.limit * 1.15 && hi > p.limit * 0.3) hi = p.limit * 1.15;
+  if (hi - lo < 1e-9) { hi += 1; lo -= p.zero ? 0 : 1; }
+  const pad = (hi - lo) * 0.08; hi += pad; if (!p.zero) lo -= pad;
+  const x = (t) => L + ((t - start) / span) * (W - L - R);
+  const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+
+  let d = "", area = "", seg = [];
+  const flush = () => {
+    if (seg.length > 1) {
+      const path = seg.map(([t, v]) => `${x(t).toFixed(1)},${y(v).toFixed(1)}`).join("L");
+      d += "M" + path;
+      area += `M${x(seg[0][0]).toFixed(1)},${y(lo).toFixed(1)}L${path}L${x(seg[seg.length - 1][0]).toFixed(1)},${y(lo).toFixed(1)}Z`;
+    }
+    seg = [];
+  };
+  series.forEach((s) => (s ? seg.push(s) : flush()));
+  flush();
+
+  const yt = [0, 1, 2].map((i) => lo + ((hi - lo) * i) / 2);
+  const xt = [];
+  if (span <= 86400) {
+    const d0 = new Date(start * 1000); d0.setMinutes(0, 0, 0); d0.setHours(d0.getHours() + 1);
+    while (d0.getHours() % 6) d0.setHours(d0.getHours() + 1);
+    for (let t = d0.getTime() / 1000; t < end; t += 6 * 3600) xt.push(t);
+  } else {
+    const days = span / 86400, every = days <= 7 ? 1 : 7;
+    const d0 = new Date(end * 1000); d0.setHours(0, 0, 0, 0);
+    for (let i = 0; i < days; i += every) xt.push(Math.floor(d0.getTime() / 1000) - i * 86400);
+  }
+  const tl = (t) => span <= 86400
+    ? new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : new Date(t * 1000).toLocaleDateString([], span <= 7 * 86400 ? { weekday: "short" } : { day: "numeric", month: "short" });
+  const dec = Math.abs(hi - lo) < 10 ? 1 : 0;
+
+  box.innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(labelOf(key))} chart">
+    ${yt.map((v) => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"${v === lo ? "" : ' stroke-dasharray="2 4"'}/><text class="axis" x="${L - 4}" y="${y(v) + 3}" text-anchor="end">${v.toFixed(dec)}</text>`).join("")}
+    ${xt.filter((t) => t > start + span * 0.03 && t < end - span * 0.03).map((t) => `<text class="axis" x="${x(t)}" y="${H - 6}" text-anchor="middle">${esc(tl(t))}</text>`).join("")}
+    ${p.limit && p.limit < hi && p.limit > lo ? `<line class="limit" x1="${L}" x2="${W - R}" y1="${y(p.limit)}" y2="${y(p.limit)}"/><text class="limit-t" x="${W - R - 2}" y="${y(p.limit) - 4}" text-anchor="end">${esc(p.limitLabel)}</text>` : ""}
+    <path class="area" d="${area}"/><path class="line" d="${d}"/>
+    <line class="cursor" id="cur-line" y1="${T}" y2="${H - B}" x1="-10" x2="-10"/><circle class="knob" id="knob" r="4.5" cx="-10" cy="-10"/>
+  </svg>`;
+  const mins = Math.round(step / 60);
+  box.insertAdjacentHTML("beforeend", `<p class="chart-cap">${mins < 60 ? mins + "-minute" : Math.round(mins / 60) + "-hour"} averages · touch the line to read a value</p>`);
+
+  const svg = box.querySelector("svg"), cur = svg.querySelector("#cur-line"), knob = svg.querySelector("#knob");
+  const fmtT = (t) => new Date(t * 1000).toLocaleString([], span <= 86400 ? { hour: "2-digit", minute: "2-digit" } : { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const onMove = (ev) => {
+    const rect = svg.getBoundingClientRect();
+    const t = start + ((((ev.clientX - rect.left) / rect.width) * W - L) / (W - L - R)) * span;
+    let best = null;
+    for (const s of series) if (s && (!best || Math.abs(s[0] - t) < Math.abs(best[0] - t))) best = s;
+    if (!best) return;
+    cur.setAttribute("x1", x(best[0])); cur.setAttribute("x2", x(best[0]));
+    knob.setAttribute("cx", x(best[0])); knob.setAttribute("cy", y(best[1]));
+    readout.innerHTML = `<span>${esc(fmtT(best[0]))}</span><span><span class="num">${fmt(key, best[1])}</span> ${esc(unitOf(key))}</span>`;
+  };
+  svg.addEventListener("pointerdown", onMove);
+  svg.addEventListener("pointermove", onMove);
+}
+
+/* ---------- alerts: native AlertsPlugin + WorkManager (android/app/src/main/java/.../Alerts*.java) ---------- */
+const Alerts = () => window.Capacitor?.Plugins?.Alerts || null;
+
+async function setAlert(id, on) {
+  const a = alerts();
+  if (on) {
+    const A = Alerts();
+    if (A) {
+      const { granted } = await A.requestNotifications();
+      if (!granted) { setMsg("Notifications are off for this app — turn them on in Android settings to get alerts.", "err"); return; }
+    }
+    a[id] = true;
+  } else {
+    delete a[id];
+  }
+  saveJSON(ALERTS_KEY, a);
+  await syncAlerts();
+}
+/** Hands the followed sensors to the native worker (it cannot read the WebView's storage). */
+async function syncAlerts() {
+  const A = Alerts();
+  if (!A) return;
+  await markers().catch(() => null);
+  const sensors = Object.keys(alerts()).map((id) => ({ id, name: deviceName(id) }));
+  try { await A.configure({ sensors }); } catch (e) { console.warn("alerts sync failed", e); }
+}
+async function testNotification() {
+  const A = Alerts();
+  if (!A) { setMsg("Notifications work in the Android app only.", "err"); return; }
+  try {
+    await syncAlerts();
+    const { sent } = await A.checkNow({ test: true });
+    setMsg(sent ? "Sent — check the notification shade." : "Check ran; nothing to report.", sent ? "ok" : "");
+  } catch (e) {
+    setMsg("Notification test failed: " + (e?.message || e), "err");
+  }
+}
+
+/* ---------- start ---------- */
+// Coming back to the app: drop data older than a minute and redraw the current screen.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  for (const [k, c] of seriesCache) if (now() - c.t > 60) seriesCache.delete(k);
+  if (markersCache && now() - markersCache.t > 60) markersCache = null;
+  render();
+});
+if (!history.state) history.replaceState({ d: 0 }, "", location.hash || "#/");
+render();
+syncAlerts();

@@ -1,0 +1,15 @@
+{
+  "appId": "social.sensors.app",
+  "appName": "sensors.social",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "allowNavigation": [
+      "sensors.social",
+      "*.sensors.social"
+    ]
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

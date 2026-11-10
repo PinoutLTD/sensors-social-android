@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">sensors.social</string>
+    <string name="title_activity_main">sensors.social</string>
+    <string name="package_name">social.sensors.app</string>
+    <string name="custom_url_scheme">social.sensors.app</string>
+</resources>
