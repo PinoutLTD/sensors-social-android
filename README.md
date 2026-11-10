@@ -3,7 +3,7 @@
 Android app for [sensors.social](https://sensors.social), the open air-quality map, and for
 Altruist sensors: follow your sensors and the ones around you, see every parameter and its history,
 get an alert when the air turns poor, and set up a new Altruist step by step.
-Made by [Pinout Limited](https://github.com/PinoutLTD), Cyprus. Capacitor 6.
+Made by [Pinout Limited](https://github.com/PinoutLimited), Cyprus. Capacitor 6.
 
 **Install:** download the APK from [Releases](../../releases) and open it on the phone
 (allow installing from this source once). Android 7.0+.
