@@ -32,12 +32,13 @@ public class AlertsWorker extends Worker {
     static final String CHANNEL = "air_alerts";
     private static final String API = "https://roseman.robonomics.network/";
     private static final long OFFLINE_AFTER = 2 * 3600;
-    // key, label, unit, good up to, poor above, decimals
-    private static final Object[][] RULES = {
-        { "pm25", "PM2.5", "µg/m³", 15.0, 35.0, 1 },
-        { "pm10", "PM10", "µg/m³", 45.0, 100.0, 1 },
-        { "co2", "CO₂", "ppm", 800.0, 1200.0, 0 },
-    };
+    // Fallback until the app hands over the map's zones (www/zones.js → AlertsPlugin.configure):
+    // poor above the last calm zone, good again in the green one. Same numbers as the map on 11.11.2026.
+    private static final String DEFAULT_RULES = "["
+        + "{\"key\":\"pm25\",\"label\":\"PM2.5\",\"unit\":\"µg/m³\",\"dec\":1,\"good\":30,\"poor\":55,\"poorLabel\":\"Unhealthy\"},"
+        + "{\"key\":\"pm10\",\"label\":\"PM10\",\"unit\":\"µg/m³\",\"dec\":1,\"good\":50,\"poor\":100,\"poorLabel\":\"Unhealthy\"},"
+        + "{\"key\":\"co2\",\"label\":\"CO₂\",\"unit\":\"ppm\",\"dec\":0,\"good\":1000,\"poor\":1000,\"poorLabel\":\"Elevated\"}"
+        + "]";
 
     public AlertsWorker(@NonNull Context context, @NonNull WorkerParameters params) {
         super(context, params);
@@ -58,6 +59,7 @@ public class AlertsWorker extends Worker {
     static int check(Context ctx, boolean test) throws Exception {
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         JSONArray sensors = new JSONArray(prefs.getString("sensors", "[]"));
+        JSONArray rules = new JSONArray(prefs.getString("rules", DEFAULT_RULES));
         JSONObject state = new JSONObject(prefs.getString("state", "{}"));
         long now = System.currentTimeMillis() / 1000;
         int sent = 0;
@@ -94,8 +96,9 @@ public class AlertsWorker extends Worker {
             st.put("offline", false);
 
             boolean reported = false;
-            for (Object[] rule : RULES) {
-                String k = (String) rule[0];
+            for (int ri = 0; ri < rules.length(); ri++) {
+                JSONObject rule = rules.getJSONObject(ri);
+                String k = rule.getString("key");
                 double sum = 0;
                 int n = 0;
                 for (int r = 0; r < rows.length(); r++) {
@@ -111,13 +114,14 @@ public class AlertsWorker extends Worker {
                 }
                 if (n == 0) continue;
                 double avg = sum / n;
-                double good = (Double) rule[3];
-                double poor = (Double) rule[4];
+                double good = rule.getDouble("good");
+                double poor = rule.getDouble("poor");
                 String level = avg > poor ? "poor" : avg <= good ? "good" : "fair";
                 String was = st.optString(k, "good");
-                String text = String.format(Locale.US, "%s %." + rule[5] + "f %s (30-min average)", rule[1], avg, rule[2]);
+                String text = String.format(Locale.US, "%s %." + rule.optInt("dec", 1) + "f %s (30-min average)",
+                    rule.optString("label", k), avg, rule.optString("unit", ""));
                 if (level.equals("poor") && !was.equals("poor")) {
-                    notify(ctx, id + ":" + k, "Poor air · " + name, text);
+                    notify(ctx, id + ":" + k, rule.optString("poorLabel", "Poor air") + " · " + name, text);
                     sent++;
                     reported = true;
                 } else if (level.equals("good") && was.equals("poor")) {

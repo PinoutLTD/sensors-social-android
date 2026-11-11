@@ -24,17 +24,20 @@ Filled buttons use #004EC4: white on #007BFF is 3.97:1. Good / Fair / Poor are f
   Assumption to confirm on a real device: the Robonomics address on CONNECTED is the sensor_id.
 
 
-- **My sensors** (`#/`) — saved sensors and owners; one card per device with its key reading
-  (PM2.5 for Urban, CO₂ for Insight) and a status dot. Add by address, owner address,
-  a sensors.social / share.sensors.social link, or a QR code.
-- **Device** (`#/s/<id>`) — a tile per parameter with the latest reading and Good / Fair / Poor,
-  an Alerts switch, Open on map (live sensors.social in the same WebView), Rename, Remove.
-- **Parameter** (`#/s/<id>/<key>`) — chart for 24 h / 7 days / 30 days (SVG, averaged into
-  10-minute / 1-hour / ~4-hour points; touch to read a value), min / average / max of single
-  readings, what the colours mean.
+- **Saved sensors** (`#/`) — saved sensors and owners; one card per device: the map's type icon
+  (Urban / Insight / Dual / DIY), the user's name for it or the id masked `4EEg…wUTr`, PM2.5 and PM10
+  with the map's rating, and "updated 2 min ago" (grey "no data for 3 h" after an hour of silence).
+  Add by address, owner address, a sensors.social / share.sensors.social link, or a QR code.
+- **Device** (`#/s/<id>`) — full id with Copy, a tile per parameter with the map's rating,
+  an Alerts switch, Open on map, Rename (name kept on the phone only), Remove, Help and support.
+- **Parameter** (`#/s/<id>/<key>`) — chart for 24 h / 7 days / 30 days, the line coloured by the
+  map's zones and gaps in grey, as on the map; min / average / max; the zone legend.
 
-Thresholds (also used by alerts): PM2.5 15 / 35 µg/m³ (WHO 24 h guideline / poor),
-PM10 45 / 100, CO₂ 800 / 1200 ppm, noise 55 / 70 dB, humidity 30–60 % good.
+Ratings come from the sensors.social map only — one source for the site and the app.
+`node tools/sync-zones.mjs [path/to/sensors.social]` copies the zones (thresholds, colours, names)
+from the map's `src/measurements` into `www/zones.js`; change a threshold on the map, then re-run it.
+Alerts use the same zones: unhealthy = above the last calm zone (PM2.5 > 55, PM10 > 100,
+CO₂ > 1000 ppm), good again back in the green zone.
 Values are raw readings, not corrected for humidity. Pressure: RoSeMAN mmHg × 1.33322 → hPa.
 
 Navigation uses `history.pushState` with a depth counter, so the in-app ‹ and Android Back agree.

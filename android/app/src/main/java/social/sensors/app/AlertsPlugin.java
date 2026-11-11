@@ -34,8 +34,13 @@ public class AlertsPlugin extends Plugin {
     @PluginMethod
     public void configure(PluginCall call) {
         JSArray sensors = call.getArray("sensors", new JSArray());
+        JSArray rules = call.getArray("rules", null);
         Context ctx = getContext();
-        ctx.getSharedPreferences(AlertsWorker.PREFS, Context.MODE_PRIVATE).edit().putString("sensors", sensors.toString()).apply();
+        android.content.SharedPreferences.Editor ed = ctx.getSharedPreferences(AlertsWorker.PREFS, Context.MODE_PRIVATE).edit()
+            .putString("sensors", sensors.toString());
+        // thresholds come from the map's zones (www/zones.js), the worker keeps the last copy
+        if (rules != null && rules.length() > 0) ed.putString("rules", rules.toString());
+        ed.apply();
         WorkManager wm = WorkManager.getInstance(ctx);
         if (sensors.length() == 0) {
             wm.cancelUniqueWork(WORK);

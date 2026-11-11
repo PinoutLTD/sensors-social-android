@@ -113,15 +113,12 @@ h1 { margin: 0; font-weight: 600; font-size: 30px; letter-spacing: -0.01em; line
 .hero .v .num { font-size: 60px; }
 .hero .v span:last-child { color: var(--muted); font-size: 15px; }
 .scale { position: relative; display: flex; gap: 3px; height: 8px; }
-.scale span { opacity: .35; }
-.scale .g { background: var(--good); border-radius: 4px 0 0 4px; }
-.scale .f { background: var(--fair); }
-.scale .p { background: var(--poor); border-radius: 0 4px 4px 0; }
+.scale span { flex: 1 1 0; opacity: .8; }
+.scale span:first-of-type { border-radius: 4px 0 0 4px; }
+.scale span:last-of-type { border-radius: 0 4px 4px 0; }
 .scale i { position: absolute; top: -4px; width: 4px; height: 16px; border-radius: 2px; background: var(--text); transform: translateX(-2px); }
 .scale-labels { position: relative; height: 14px; color: var(--muted); font-size: 11px; margin-top: 6px; }
 .scale-labels span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
-.scale-labels span:first-child { transform: none; }
-.scale-labels span:last-child { transform: translateX(-100%); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .tile { display: flex; flex-direction: column; gap: 8px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 16px; color: var(--text); }
 .tile .t-top { display: flex; justify-content: space-between; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 500; }
@@ -157,9 +154,8 @@ svg.chart { display: block; width: 100%; height: auto; touch-action: pan-y; }
 svg.chart .grid { stroke: var(--line); stroke-width: 1; }
 svg.chart .axis { fill: var(--muted); font: 10px "Roboto Flex", sans-serif; }
 svg.chart .line { fill: none; stroke: var(--blue); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-svg.chart .area { fill: var(--blue); opacity: .10; }
-svg.chart .limit { stroke: var(--poor); stroke-width: 1; stroke-dasharray: 5 4; }
-svg.chart .limit-t { fill: var(--poor); font: 10px "Roboto Flex", sans-serif; }
+svg.chart .line { stroke-width: 2.5; }
+svg.chart .gap { fill: none; stroke-width: 1.5; stroke-dasharray: 3 4; }
 svg.chart .cursor { stroke: var(--text); stroke-width: 1; opacity: .35; }
 svg.chart .knob { fill: var(--surface); stroke: var(--blue); stroke-width: 2; }
 .chart-cap { margin: 4px 6px 0; color: var(--muted); font-size: 11px; }
@@ -251,3 +247,34 @@ ol.nums li > span { width: 28px; height: 28px; flex-shrink: 0; border-radius: 14
 .hero-cols.two .hero-col .v .num { font-size: 40px; }
 .hero-col .v span:last-child { color: var(--muted); font-size: 13px; }
 .hero-col .scale-labels { font-size: 10px; }
+
+/* 0.3.2: ratings in the map's zone colours (www/zones.js). Map colours are light (#6bde28, #fdcb24),
+   so they mark a dot or a bar, and the text next to them stays in the text colour. */
+.chip.z { color: var(--text); background: var(--surface2); }
+.chip.z::before { background: var(--zc); width: 10px; height: 10px; border-radius: 5px; }
+.zw { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-weight: 600; }
+.zw::before { content: ""; width: 8px; height: 8px; border-radius: 4px; background: var(--zc); flex-shrink: 0; }
+.type-ic { width: 40px; height: 40px; object-fit: contain; flex-shrink: 0; }
+.dev-head { align-items: center; }
+.dev-head .dh-t { flex: 1; min-width: 0; }
+.dev-head .dh-t b { font-size: 18px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.when.stale, .status-line .stale { color: var(--muted); font-style: italic; }
+.is-stale .num { color: var(--muted); }
+.dev-title { display: flex; align-items: center; gap: 12px; }
+.dev-title .type-ic { width: 52px; height: 52px; }
+.dev-title > div { min-width: 0; }
+.dev-title h1 { font-weight: 700; overflow-wrap: anywhere; }
+.dev-title small { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; }
+.id-row { display: flex; align-items: center; gap: 10px; width: 100%; margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 12px; background: var(--surface); color: var(--muted); text-align: left; }
+.id-row span { flex: 1; min-width: 0; font: 500 12px/1.35 ui-monospace, "Roboto Mono", monospace; overflow-wrap: anywhere; }
+.id-row b { color: var(--blue2); font-size: 13px; font-weight: 600; flex-shrink: 0; }
+.status-line { margin-top: 12px; }
+.rename { margin-top: 12px; }
+.legend { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; font-size: 13px; }
+.legend div { display: flex; align-items: center; gap: 10px; }
+.legend i { width: 18px; height: 6px; border-radius: 3px; flex-shrink: 0; }
+.legend span { flex: 1; }
+.legend small { color: var(--muted); font-size: 12px; }
+.support { display: block; text-align: center; color: var(--blue2); font-size: 14px; font-weight: 500; margin: 14px 0 4px; padding: 10px; }
+@media (prefers-color-scheme: dark) { .support, .id-row b { color: var(--blue); } }
