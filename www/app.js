@@ -1,5 +1,5 @@
 /*
- * sensors.social Android app (v0.3.3), screens from the app design
+ * sensors.social Android app (v0.3.4), screens from the app design
  * styled by the Brand Family System (Pinout Limited).
  *   #/              my sensors: one card per device, key reading, status, three small readings
  *   #/add           add a sensor: set up a new Altruist / scan a QR / paste an address
@@ -595,7 +595,7 @@ async function renderDevice(id, tok) {
     <div class="status-line" id="status"><span class="dot"></span><span>Loading…</span></div>
     <div id="hero"></div>
     <div class="tiles" id="tiles"></div>
-    <div class="card row-set"><div><b>Alerts</b><small>Air turns unhealthy on the map’s scale, or the sensor is offline for 2 h. Checked about every 15 min.</small></div>
+    <div class="card row-set"><div><b>Alerts</b><small>Air turns Poor on the map’s scale, or the sensor is offline for 2 h. Checked about every 15 min.</small></div>
       <label class="switch"><input type="checkbox" id="alert" ${following ? "checked" : ""} aria-label="Alerts"><span></span></label></div>
     <form class="card rename" id="rn" hidden autocomplete="off">
       <label class="lbl" for="rnq">Name on this phone</label>
@@ -851,7 +851,13 @@ function alertRules() {
     const zs = ZONES[k].zones;
     let calm = -1;
     zs.forEach((z, i) => { if (CALM.has(z.color.toLowerCase()) && z.max !== null) calm = i; });
-    const green = zs.findIndex((z) => z.color.toLowerCase() === "#6bde28");
+    // PM is on the EEA scale since 12.11.2026: Fair (≤15 PM2.5) is still calm in colour, but an alert at 15
+    // would ring most humid evenings. Alert from Poor (PM2.5 > 50, PM10 > 120), the EEA step after Moderate.
+    const poorAt = zs.findIndex((z) => z.label === "Poor");
+    if (poorAt > 0) calm = poorAt - 1;
+    // "Good again" at Fair (the WHO 24-h guideline) — EEA Good (≤5 PM2.5) is rarely reached in humid air.
+    const fair = zs.findIndex((z) => z.label === "Fair");
+    const green = fair >= 0 ? fair : zs.findIndex((z) => z.color.toLowerCase() === "#6bde28");
     return { key: k, label: labelOf(k), unit: unitOf(k), dec: PARAMS[k].dec,
       poor: zs[calm].max, good: zs[green >= 0 ? green : 0].max, poorLabel: zs[calm + 1].label };
   });

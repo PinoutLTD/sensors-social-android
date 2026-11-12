@@ -5,29 +5,34 @@ const MAP_ZONES = {
   "unit": "μg/m3",
   "zones": [
    {
-    "max": 30,
+    "max": 5,
     "color": "#6bde28",
     "label": "Good"
    },
    {
-    "max": 55,
+    "max": 15,
     "color": "#01eaea",
+    "label": "Fair"
+   },
+   {
+    "max": 50,
+    "color": "#fdcb24",
     "label": "Moderate"
    },
    {
-    "max": 110,
-    "color": "#fdcb24",
-    "label": "Unhealthy"
+    "max": 90,
+    "color": "#ff8732",
+    "label": "Poor"
    },
    {
-    "max": 250,
-    "color": "#ff8732",
-    "label": "Very Unhealthy"
+    "max": 140,
+    "color": "#fd4c1f",
+    "label": "Very poor"
    },
    {
     "max": null,
-    "color": "#fd4c1f",
-    "label": "Unacceptable"
+    "color": "#eb0004",
+    "label": "Extremely poor"
    }
   ],
   "about": "PM 2.5 is atmospheric particles with a size of up to 2.5 micrometers, which include dust, soot, and smoke. They can be harmful to health, causing breathing problems, allergies, and cardiovascular diseases. Sources of PM 2.5 include industry, transportation, and household emissions. Monitoring and reducing their levels are important for health and clean air."
@@ -36,29 +41,34 @@ const MAP_ZONES = {
   "unit": "μg/m3",
   "zones": [
    {
-    "max": 50,
+    "max": 15,
     "color": "#6bde28",
     "label": "Good"
    },
    {
-    "max": 100,
+    "max": 45,
     "color": "#01eaea",
+    "label": "Fair"
+   },
+   {
+    "max": 120,
+    "color": "#fdcb24",
     "label": "Moderate"
    },
    {
-    "max": 250,
-    "color": "#fdcb24",
-    "label": "Unhealthy"
+    "max": 195,
+    "color": "#ff8732",
+    "label": "Poor"
    },
    {
-    "max": 350,
-    "color": "#ff8732",
-    "label": "Very Unhealthy"
+    "max": 270,
+    "color": "#fd4c1f",
+    "label": "Very poor"
    },
    {
     "max": null,
-    "color": "#fd4c1f",
-    "label": "Unacceptable"
+    "color": "#eb0004",
+    "label": "Extremely poor"
    }
   ],
   "about": "PM 10 (Particulate Matter 10) consists of atmospheric particles with a size of up to 10 µm, including dust, soot and other pollutants. They can cause health problems by affecting breathing and contributing to respiratory diseases. Sources include industrial emissions, road dust and fuel combustion."
