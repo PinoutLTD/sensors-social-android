@@ -1,5 +1,5 @@
 /*
- * sensors.social Android app (v0.3.4), screens from the app design
+ * sensors.social Android app (v0.3.5), screens from the app design
  * styled by the Brand Family System (Pinout Limited).
  *   #/              my sensors: one card per device, key reading, status, three small readings
  *   #/add           add a sensor: set up a new Altruist / scan a QR / paste an address
@@ -230,6 +230,35 @@ function render() {
 const barBack = (label = "Back") => `<button class="icon-btn plain" id="back" aria-label="${label}">${ICON.back}</button>`;
 function setMsg(t, kind = "") { const m = $("#msg"); if (m) { m.textContent = t; m.className = "msg" + (kind ? " " + kind : ""); } }
 
+/* ---------- footer ---------- */
+const REPO = "https://github.com/PinoutLimited/sensors-social-android";
+const ODBL = "https://opendatacommons.org/licenses/odbl/1-0/";
+/** Home screen footer: where to go next, what is open, which version this is. */
+function appFooter() {
+  return `<footer class="app-foot">
+    <nav aria-label="sensors.social">
+      <a href="${SITE}" data-site="">Map</a><a href="${SITE}blog/" data-site="blog/">Blog</a>
+      <a href="${SUPPORT}">Help and support</a><a href="${SITE}privacy-policy/" data-site="privacy-policy/">Privacy</a>
+    </nav>
+    <p>Open source, AGPL-3.0 · <a href="${REPO}">Source code on GitHub</a></p>
+    <p>Sensor data © sensors.social contributors, <a href="${ODBL}">ODbL 1.0</a> · Secured by Polkadot</p>
+    <p><a id="ver" href="${REPO}/releases">sensors.social for Android</a> · Pinout Limited</p>
+  </footer>`;
+}
+/** sensors.social links open in the Custom Tab like the map; the version comes from the installed app. */
+function wireFooter() {
+  document.querySelectorAll(".app-foot a[data-site]").forEach((a) => {
+    a.onclick = (e) => { e.preventDefault(); openSite(SITE + a.dataset.site); };
+  });
+  const App = window.Capacitor?.Plugins?.App;
+  App?.getInfo?.().then((info) => {
+    const v = $("#ver");
+    if (!v || !info?.version) return;
+    v.textContent = `sensors.social for Android ${info.version}`;
+    v.href = `${REPO}/releases/tag/v${info.version}`;
+  }).catch(() => {});
+}
+
 /* ---------- home ---------- */
 function renderHome(tok) {
   const items = saved();
@@ -244,10 +273,11 @@ function renderHome(tok) {
     <div class="foot">
       <button class="btn" id="add">${ICON.plus}Add a sensor</button>
       <p>New Altruist, an address, or a QR code</p>
-      <a class="support" id="support" href="${SUPPORT}">Help and support</a>
-    </div>`;
+    </div>
+    ${appFooter()}`;
   $("#map").onclick = () => openSite(SITE);
   $("#add").onclick = () => nav("#/add");
+  wireFooter();
 
   const list = $("#list");
   markers().catch(() => []).then(() => {

@@ -1,6 +1,6 @@
 {
   "name": "sensors-social-android",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "description": "Android shell for sensors.social: open a sensor or an owner by address",
   "scripts": {
