@@ -1,5 +1,5 @@
 /*
- * sensors.social Android app (v0.3.2), screens from the app design
+ * sensors.social Android app (v0.3.3), screens from the app design
  * styled by the Brand Family System (Pinout Limited).
  *   #/              my sensors: one card per device, key reading, status, three small readings
  *   #/add           add a sensor: set up a new Altruist / scan a QR / paste an address
@@ -13,6 +13,14 @@
 
 const API = "https://roseman.robonomics.network/";
 const SITE = "https://sensors.social/";
+
+/* The map opens in a Chrome Custom Tab over the app: its × and the system Back return to the
+ * sensors. Loaded in the app's own WebView it replaced the app, with no visible way back. */
+const openSite = (url) => {
+  const B = window.Capacitor?.Plugins?.Browser;
+  if (B) B.open({ url, toolbarColor: "#004EC4" });
+  else location.href = url;
+};
 const SAVED_KEY = "ss.saved.v1";
 const ALERTS_KEY = "ss.alerts.v1";
 const SETUP_KEY = "ss.setup.v1";
@@ -171,12 +179,15 @@ function freshness(ts) {
   const h = Math.round((now() - ts) / 3600);
   return { stale: true, text: "no data for " + (h < 48 ? h + " h" : Math.round(h / 24) + " days") };
 }
-/** Bold title: the user's name for it, otherwise the id masked 4…4. */
-const deviceTitle = (id) => labels()[id] || short(id);
+/* Names instead of addresses, the same as on the map (www/names.js, from tools/sync-names.mjs):
+ * sensors are plants ("Sleepy Clematis"), owners are animals ("Woolly Pony"). The full id stays
+ * only on the sensor screen, with Copy. */
+/** Bold title: the user's own name for it, otherwise the sensor's name from the map. */
+const deviceTitle = (id) => labels()[id] || sensorName(id);
 const hasLabel = (id) => !!labels()[id];
-/** Grey line under the title: the type, plus the id when the title is a name. */
-const deviceSub = (id) => TYPE_TITLE[typeOf(id)] + (hasLabel(id) ? " · " + short(id) : "");
-const deviceName = (id) => (hasLabel(id) ? `${labels()[id]} · ${short(id)}` : `${TYPE_TITLE[typeOf(id)]} · ${short(id)}`);
+/** Grey line under the title: the type, plus the map name when the user renamed it. */
+const deviceSub = (id) => TYPE_TITLE[typeOf(id)] + (hasLabel(id) ? " · " + sensorName(id) : "");
+const deviceName = (id) => `${deviceTitle(id)} · ${TYPE_TITLE[typeOf(id)]}`;
 function keysOf(rec) {
   const ks = Object.keys(rec?.data || {});
   return [...ORDER.filter((k) => ks.includes(k)), ...ks.filter((k) => !ORDER.includes(k))];
@@ -232,7 +243,7 @@ function renderHome(tok) {
       <p>New Altruist, an address, or a QR code</p>
       <a class="support" id="support" href="${SUPPORT}">Help and support</a>
     </div>`;
-  $("#map").onclick = () => { location.href = SITE; };
+  $("#map").onclick = () => openSite(SITE);
   $("#add").onclick = () => nav("#/add");
 
   const list = $("#list");
@@ -242,7 +253,7 @@ function renderHome(tok) {
       if (item.kind === "owner") {
         const head = document.createElement("div");
         head.className = "owner-head";
-        head.innerHTML = `<b>${esc(item.label || "Owner " + short(item.id))}</b><button class="btn danger sm" data-a="del">Remove</button>`;
+        head.innerHTML = `<b>${esc(item.label || ownerName(item.id))}</b><button class="btn danger sm" data-a="del">Remove</button>`;
         head.querySelector("[data-a=del]").onclick = () => { removeItem(item.id); render(); };
         list.appendChild(head);
         const devs = (markersCache?.list || []).filter((m) => m.owner === item.id);
@@ -465,7 +476,7 @@ function renderSetup(step) {
         <button class="btn secondary" id="skip">Skip — I’ll add it later</button></div>`;
     const show = () => {
       const q = parseConnected($("#conn").value);
-      $("#parsed").innerHTML = `<div><span>IP address</span><span>${q.ip ? esc(q.ip) : "—"}</span></div><div><span>Robonomics address</span><span>${q.addr ? esc(short(q.addr)) : "—"}</span></div>`;
+      $("#parsed").innerHTML = `<div><span>IP address</span><span>${q.ip ? esc(q.ip) : "—"}</span></div><div><span>Robonomics address</span><span>${q.addr ? esc(sensorName(q.addr) + " · " + short(q.addr)) : "—"}</span></div>`;
       const ok = !!(q.ip || q.addr);
       $("#next").disabled = !ok; $("#next").style.opacity = ok ? "" : ".5";
       setSetup({ connected: $("#conn").value });
@@ -601,7 +612,7 @@ async function renderDevice(id, tok) {
   $("#idrow").onclick = (e) => copy(id, e.currentTarget.querySelector("b"));
   $("#rename").onclick = () => { const f = $("#rn"); f.hidden = !f.hidden; if (!f.hidden) $("#rnq").focus(); };
   $("#rn").onsubmit = (e) => { e.preventDefault(); setLabel(id, $("#rnq").value.trim()); syncAlerts(); render(); };
-  $("#map").onclick = () => { location.href = `${SITE}?sensor=${encodeURIComponent(id)}`; };
+  $("#map").onclick = () => openSite(`${SITE}?sensor=${encodeURIComponent(id)}`);
   const toggle = async (on) => { await setAlert(id, on); render(); };
   $("#bell").onclick = () => toggle(!following);
   $("#alert").onchange = (e) => toggle(e.target.checked);
