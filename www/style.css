@@ -268,6 +268,7 @@ ol.nums li > span { width: 28px; height: 28px; flex-shrink: 0; border-radius: 14
 .id-row { display: flex; align-items: center; gap: 10px; width: 100%; margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--line);
   border-radius: 12px; background: var(--surface); color: var(--muted); text-align: left; }
 .id-row span { flex: 1; min-width: 0; font: 500 12px/1.35 ui-monospace, "Roboto Mono", monospace; overflow-wrap: anywhere; }
+.id-row small { display: block; margin-bottom: 2px; color: var(--muted, #6b6b6b); font: 500 11px/1.2 "Roboto Flex", sans-serif; }
 .id-row b { color: var(--blue2); font-size: 13px; font-weight: 600; flex-shrink: 0; }
 .status-line { margin-top: 12px; }
 .rename { margin-top: 12px; }

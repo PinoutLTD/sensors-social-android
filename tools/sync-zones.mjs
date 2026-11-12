@@ -15,16 +15,20 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SITE = resolve(process.argv[2] || join(HERE, "../../sensors.social"));
-const KEYS = ["pm25", "pm10", "co2", "noiseavg", "noisemax", "temperature", "humidity", "pressure"];
+const KEYS = ["pm25", "pm10", "co2", "noiseavg", "noisemax", "temperature", "humidity", "pressure", "dose_rate_nsv_h"];
 
 const css = readFileSync(join(SITE, "src/assets/styles/variables.css"), "utf8");
 const vars = Object.fromEntries([...css.matchAll(/--(measure-[a-z]+):\s*(#[0-9a-fA-F]{3,8})/g)].map((m) => [m[1], m[2]]));
 const colour = (c) => String(c).replace(/var\(--(measure-[a-z]+)\)/, (_, v) => vars[v] || c);
 
 const shim = "data:text/javascript," + encodeURIComponent("export const toFixed=(v,n=2)=>Number(v).toFixed(n);");
+// only zones and labels are read here, so value helpers can be stand-ins
+const aliasShim = "data:text/javascript," + encodeURIComponent("export const measurementValue=(id,v)=>Number(v);export const canonicalMeasurementId=(id)=>id;");
 const out = {};
 for (const k of KEYS) {
-  const src = readFileSync(join(SITE, "src/measurements", k + ".js"), "utf8").replace(/from\s+["']\.\/tools["']/g, `from "${shim}"`);
+  const src = readFileSync(join(SITE, "src/measurements", k + ".js"), "utf8")
+    .replace(/from\s+["']\.\/tools["']/g, `from "${shim}"`)
+    .replace(/from\s+["']\.\/aliases["']/g, `from "${aliasShim}"`);
   const m = (await import("data:text/javascript," + encodeURIComponent(src))).default;
   const about = (m.description || []).find((d) => d.tag === "p")?.text?.en || "";
   out[k] = {

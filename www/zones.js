@@ -249,5 +249,41 @@ const MAP_ZONES = {
   ],
   "about": "Atmospheric pressure is the weight of the air column pressing on the Earth’s surface, expressed here in millimetres of mercury (mmHg). The long-term mean at sea level is ≈ 760 mmHg. Barometric swings reflect weather systems: falling pressure often precedes clouds and storms, while rising pressure brings clear, calm conditions. Sudden changes can affect well-being, causing headaches, dizziness or fluctuations in blood pressure in sensitive people."
  },
+ "dose_rate_nsv_h": {
+  "unit": "nSv/h",
+  "zones": [
+   {
+    "max": 100,
+    "color": "#1dafaf",
+    "label": "0–100"
+   },
+   {
+    "max": 200,
+    "color": "#1d8baf",
+    "label": "100–200"
+   },
+   {
+    "max": 300,
+    "color": "#1d66af",
+    "label": "200–300"
+   },
+   {
+    "max": 500,
+    "color": "#1d41af",
+    "label": "300–500"
+   },
+   {
+    "max": 2000,
+    "color": "#411daf",
+    "label": "500–2000"
+   },
+   {
+    "max": null,
+    "color": "#661daf",
+    "label": ">2000"
+   }
+  ],
+  "about": "Radiation dose rate is shown in nanosieverts per hour (nSv/h). 1,000 nSv/h = 1 µSv/h. These readings are separate from the RadSens exposure rate in µR/h."
+ },
  "nodata": "#d5d3d3"
 };

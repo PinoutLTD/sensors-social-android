@@ -43,8 +43,10 @@ const PARAMS = {
   humidity: { label: "Humidity", unit: "%", dec: 0 },
   pressure: { label: "Pressure", unit: "hPa", dec: 0, conv: (v) => v * 1.33322, inv: (v) => v / 1.33322,
     note: "Air pressure at the sensor's altitude, not reduced to sea level." },
+  dose_rate_nsv_h: { label: "Dose rate", long: "Radiation dose rate", unit: "nSv/h", dec: 0,
+    note: "EURDEP display ranges. Colour shows the measured dose rate, not a safety classification." },
 };
-const ORDER = ["pm25", "pm10", "co2", "noiseavg", "noisemax", "temperature", "humidity", "pressure"];
+const ORDER = ["pm25", "pm10", "co2", "noiseavg", "noisemax", "temperature", "humidity", "pressure", "dose_rate_nsv_h"];
 const MAIN_KEY = ["pm25", "co2", "pm10", "temperature"];
 const PM = ["pm25", "pm10"]; // shown together as the main metric: fine vs coarse tells smoke from dust
 const PERIODS = { "24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400 };
@@ -188,9 +190,10 @@ const hasLabel = (id) => !!labels()[id];
 /** Grey line under the title: the type, plus the map name when the user renamed it. */
 const deviceSub = (id) => TYPE_TITLE[typeOf(id)] + (hasLabel(id) ? " · " + sensorName(id) : "");
 const deviceName = (id) => `${deviceTitle(id)} · ${TYPE_TITLE[typeOf(id)]}`;
+/** Only what the map shows: raw service fields (count_rate_cps, *_error_pct…) stay hidden, as on the map. */
 function keysOf(rec) {
   const ks = Object.keys(rec?.data || {});
-  return [...ORDER.filter((k) => ks.includes(k)), ...ks.filter((k) => !ORDER.includes(k))];
+  return ORDER.filter((k) => ks.includes(k));
 }
 
 /* ---------- navigation: pushState with depth, so in-app Back and Android Back agree ---------- */
@@ -588,8 +591,7 @@ async function renderDevice(id, tok) {
     <div class="bar">${barBack("Back to saved sensors")}<div class="end">
       <button class="icon-btn ${following ? "on" : ""}" id="bell" aria-label="${following ? "Alerts are on" : "Alerts are off"}" aria-pressed="${following}">${ICON.bell}</button>
       <button class="icon-btn" id="map" aria-label="Open on map">${ICON.map}</button></div></div>
-    <div class="dev-title"><span id="ticon">${typeIcon(id)}</span><div><h1 id="title">${esc(deviceTitle(id))}</h1><small id="ttype">${esc(TYPE_TITLE[typeOf(id)])}</small></div></div>
-    <button class="id-row" id="idrow" aria-label="Copy the sensor id"><span>${esc(id)}</span><b>Copy</b></button>
+    <div class="dev-title"><span id="ticon">${typeIcon(id)}</span><div><h1 id="title">${esc(deviceTitle(id))}</h1><small id="ttype">${esc(deviceSub(id))}</small></div></div>
     <div class="status-line" id="status"><span class="dot"></span><span>Loading…</span></div>
     <div id="hero"></div>
     <div class="tiles" id="tiles"></div>
@@ -598,7 +600,7 @@ async function renderDevice(id, tok) {
     <form class="card rename" id="rn" hidden autocomplete="off">
       <label class="lbl" for="rnq">Name on this phone</label>
       <div class="field"><input id="rnq" maxlength="40" placeholder="e.g. Balcony" value="${esc(labels()[id] || "")}"><button class="btn sm" type="submit">Save</button></div>
-      <p class="muted" style="margin:8px 0 0;font-size:13px">Only you see it. The id stays under the name.</p>
+      <p class="muted" style="margin:8px 0 0;font-size:13px">Only you see it. The name from the map stays under it.</p>
     </form>
     <div class="btn-row">
       <button class="btn outline sm" id="rename">Rename</button>
@@ -606,6 +608,7 @@ async function renderDevice(id, tok) {
       ${following ? `<button class="btn outline sm" id="test">Test notification</button>` : ""}
     </div>
     <p class="msg" id="msg"></p>
+    <button class="id-row" id="idrow" aria-label="Copy the sensor id"><span><small>Sensor id</small>${esc(id)}</span><b>Copy</b></button>
     <a class="support" href="${SUPPORT}">Help and support</a>`;
 
   $("#back").onclick = () => back("#/");
@@ -626,7 +629,7 @@ async function renderDevice(id, tok) {
     if (tok !== renderToken) return;
     $("#title").textContent = deviceTitle(id);
     $("#ticon").innerHTML = typeIcon(id);
-    $("#ttype").textContent = TYPE_TITLE[typeOf(id)];
+    $("#ttype").textContent = deviceSub(id);
     const rec = freshest(id) || latestOf(r);
     if (!rec) { $("#status").innerHTML = `<span class="dot"></span><span>No data for 24 h</span>`; return; }
     const f = freshness(rec.timestamp);
