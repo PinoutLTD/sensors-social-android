@@ -29,7 +29,10 @@ import org.json.JSONObject;
 public class AlertsWorker extends Worker {
 
     static final String PREFS = "alerts";
-    static final String CHANNEL = "air_alerts";
+    // v2: high importance, so a Poor-air alert pops up instead of waiting in the shade. Android keeps a
+    // channel's importance once created, hence a new id; the old "air_alerts" channel is deleted.
+    static final String CHANNEL = "air_alerts_v2";
+    private static final String OLD_CHANNEL = "air_alerts";
     private static final String API = "https://roseman.robonomics.network/";
     private static final long OFFLINE_AFTER = 2 * 3600;
     // Fallback until the app hands over the map's zones (www/zones.js → AlertsPlugin.configure):
@@ -162,9 +165,11 @@ public class AlertsWorker extends Worker {
 
     static void ensureChannel(Context ctx) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel ch = new NotificationChannel(CHANNEL, "Air alerts", NotificationManager.IMPORTANCE_DEFAULT);
+            NotificationManager nm = ctx.getSystemService(NotificationManager.class);
+            NotificationChannel ch = new NotificationChannel(CHANNEL, "Air alerts", NotificationManager.IMPORTANCE_HIGH);
             ch.setDescription("Poor air and offline sensors you follow");
-            ctx.getSystemService(NotificationManager.class).createNotificationChannel(ch);
+            nm.createNotificationChannel(ch);
+            nm.deleteNotificationChannel(OLD_CHANNEL);
         }
     }
 
@@ -178,6 +183,7 @@ public class AlertsWorker extends Worker {
             .setContentText(body)
             .setStyle(new NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(pi)
+            .setPriority(NotificationCompat.PRIORITY_HIGH) // heads-up on Android 7, before channels
             .setAutoCancel(true);
         try {
             NotificationManagerCompat.from(ctx).notify(key.hashCode(), b.build());
