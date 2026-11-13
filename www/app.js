@@ -369,9 +369,67 @@ function removeItem(id) {
   saveJSON(SAVED_KEY, saved().filter((x) => x.id !== id));
   const a = alerts(); delete a[id]; saveJSON(ALERTS_KEY, a); syncAlerts();
 }
+/** The map shows two-word names instead of addresses ("Auburn Horseradish" for a sensor, "Slender
+ * Scorpion" for an owner). They are computed from the address, so a typed name is found among the
+ * sensors seen on the map in the last 24 h. */
+async function findByName(text) {
+  const want = text.toLowerCase().replace(/[^a-z]+/g, " ").trim();
+  if (!/^[a-z]+ [a-z]+$/.test(want)) return null;
+  const norm = (n) => n.toLowerCase();
+  const list = await markers();
+  const sensors = [...new Set(list.filter((m) => norm(sensorName(m.sensor_id)) === want).map((m) => m.sensor_id))];
+  const owners = [...new Set(list.filter((m) => m.owner && norm(ownerName(m.owner)) === want).map((m) => m.owner))];
+  if (sensors.length + owners.length > 1) return { many: true };
+  if (sensors.length) return { id: sensors[0], kind: "sensor" };
+  if (owners.length) return { id: owners[0], kind: "owner" };
+  return { none: true };
+}
+/** Suggestions while typing: real names of the sensors and owners on the map, not dictionary words,
+ * so every suggestion is something that exists. "aub" → Auburn Horseradish; "slender sc" → the owner. */
+let nameIndex = null;
+async function nameItems() {
+  const list = await markers();
+  if (nameIndex?.list === list) return nameIndex.items;
+  const items = [], owners = new Map();
+  for (const m of list) {
+    items.push({ id: m.sensor_id, kind: "sensor", name: sensorName(m.sensor_id), sub: TYPE_TITLE[typeOf(m.sensor_id)] || "Sensor" });
+    if (m.owner) owners.set(m.owner, (owners.get(m.owner) || 0) + 1);
+  }
+  for (const [o, n] of owners) items.push({ id: o, kind: "owner", name: ownerName(o), sub: `Owner · ${n} sensor${n > 1 ? "s" : ""}` });
+  nameIndex = { list, items };
+  return items;
+}
+let suggSeq = 0;
+async function suggest(text) {
+  const box = $("#sugg");
+  if (!box) return;
+  const want = text.toLowerCase().replace(/[^a-z ]+/g, "").replace(/\s+/g, " ").trimStart();
+  if (want.length < 2 || /\d/.test(text)) { box.innerHTML = ""; return; }
+  const seq = ++suggSeq;
+  let items;
+  try { items = await nameItems(); } catch { return; }
+  if (seq !== suggSeq) return;
+  const words = want.trim().split(" ");
+  const hits = items.filter((it) => {
+    const parts = it.name.toLowerCase().split(" ");
+    return words.length === 1 ? parts.some((p) => p.startsWith(words[0])) : words.every((w, i) => (parts[i] || "").startsWith(w));
+  }).sort((a, b) => (b.name.toLowerCase().startsWith(want) - a.name.toLowerCase().startsWith(want)) || a.name.localeCompare(b.name))
+    .slice(0, 6);
+  box.innerHTML = hits.map((h, i) => `<button type="button" class="sugg-item" role="option" data-i="${i}"><b>${esc(h.name)}</b><small>${esc(h.sub)}</small></button>`).join("");
+  box.querySelectorAll("button").forEach((b) => (b.onclick = () => addItem(hits[+b.dataset.i].id, hits[+b.dataset.i].kind)));
+}
 async function addFromText(text) {
   const { id, kind } = parseInput(text);
-  if (!SS58.test(id)) { setMsg("This doesn't look like a Robonomics address (46–48 characters, starts with 4).", "err"); return; }
+  if (!SS58.test(id)) {
+    setMsg("Looking it up…");
+    let hit = null;
+    try { hit = await findByName(text); } catch (e) { setMsg("Could not reach RoSeMAN: " + e.message, "err"); return; }
+    if (hit?.id) return addItem(hit.id, hit.kind);
+    if (hit?.many) { setMsg("Several sensors have this name. Paste the address instead.", "err"); return; }
+    if (hit?.none) { setMsg("No sensor or owner with this name has reported in the last 24 hours. Check the name on the map, or paste the address.", "err"); return; }
+    setMsg("Type a name of two words, as on the map, or paste an address (starts with 4).", "err");
+    return;
+  }
   if (kind) return addItem(id, kind);
   setMsg("Looking it up…");
   try {
@@ -392,9 +450,10 @@ function renderAdd() {
       <button class="card option primary" id="new"><span class="ic">${ICON.device}</span><span class="tx"><b>Set up a new Altruist</b><small>Wi-Fi and a place on the map · about 5 min</small></span>${ICON.chev}</button>
       <button class="card option" id="scan"><span class="ic">${ICON.qr}</span><span class="tx"><b>Scan a QR code</b><small>From a sensor page on sensors.social</small></span></button>
       <form class="card" id="f" autocomplete="off">
-        <label for="q" style="display:block;font-size:17px;font-weight:600">Paste an address</label>
-        <p class="muted" style="margin:2px 0 10px;font-size:13px">Sensor or owner — the app tells which</p>
-        <div class="field"><input id="q" placeholder="4…" spellcheck="false" autocapitalize="off"><button class="btn outline sm" type="submit">Add</button></div>
+        <label for="q" style="display:block;font-size:17px;font-weight:600">Name or address</label>
+        <p class="muted" style="margin:2px 0 10px;font-size:13px">Sensor or owner as on the map, e.g. Auburn Horseradish — or paste an address</p>
+        <div class="field"><input id="q" placeholder="Name or 4…" spellcheck="false" autocapitalize="off" autocomplete="off"><button class="btn outline sm" type="submit">Add</button></div>
+        <div class="sugg" id="sugg" role="listbox" aria-label="Matching sensors and owners"></div>
       </form>
     </div>
     <p class="msg" id="msg"></p>`;
@@ -402,33 +461,87 @@ function renderAdd() {
   $("#new").onclick = () => { saveJSON(SETUP_KEY, {}); nav("#/setup/1"); };
   $("#scan").onclick = scanQR;
   $("#f").onsubmit = (e) => { e.preventDefault(); addFromText($("#q").value); };
+  $("#q").oninput = () => suggest($("#q").value);
+  markers().catch(() => {}); // warm up: the first suggestion should not wait for the network
 }
 
-/** Google code scanner via @capacitor-mlkit/barcode-scanning: no camera permission needed. */
+/** QR: Google code scanner first (Play services UI, no camera permission). Phones without Google
+ * Play services (GrapheneOS, de-Googled builds) cannot load it — "ModuleInstall.API is not available"
+ * — so they scan with the app's own camera and the ML Kit model bundled in the APK. */
 async function scanQR() {
   const BS = window.Capacitor?.Plugins?.BarcodeScanner;
   if (!BS) { setMsg("QR scanning works in the Android app only.", "err"); return; }
+  let google = false;
+  try { google = (await BS.isGoogleBarcodeScannerModuleAvailable()).available; }
+  catch { return addFromScan(await scanWithCamera(BS)); }
   try {
-    const { available } = await BS.isGoogleBarcodeScannerModuleAvailable();
-    if (!available) {
+    if (!google) {
       setMsg("Downloading the scanner from Google Play services…");
       await BS.installGoogleBarcodeScannerModule();
-      let ok = false;
-      for (let i = 0; i < 60 && !ok; i++) {
+      for (let i = 0; i < 60 && !google; i++) {
         await new Promise((r) => setTimeout(r, 1000));
-        ok = (await BS.isGoogleBarcodeScannerModuleAvailable()).available;
+        google = (await BS.isGoogleBarcodeScannerModuleAvailable()).available;
       }
-      if (!ok) { setMsg("Scanner is still downloading — try again in a minute.", "err"); return; }
+      if (!google) return addFromScan(await scanWithCamera(BS));
+      setMsg("");
     }
     const { barcodes } = await BS.scan({ formats: ["QR_CODE"] });
-    const raw = barcodes?.[0]?.rawValue || "";
-    if (raw) addFromText(raw); else setMsg("");
+    addFromScan(barcodes?.[0]?.rawValue || "");
   } catch (e) {
     const t = String(e?.message || e);
     // Google code scanner reports Back as "Failed to scan code", not as a cancel.
     if (/cancel|failed to scan code/i.test(t)) { setMsg(""); return; }
-    setMsg("Scanner error: " + t, "err");
+    console.warn("Google code scanner:", t);
+    addFromScan(await scanWithCamera(BS));
   }
+}
+function addFromScan(raw) { if (raw) addFromText(raw); }
+
+/** Full-screen camera: the plugin draws the preview behind a transparent WebView, we draw the frame. */
+async function scanWithCamera(BS) {
+  try {
+    let { camera } = await BS.checkPermissions();
+    if (camera !== "granted" && camera !== "limited") ({ camera } = await BS.requestPermissions());
+    if (camera !== "granted" && camera !== "limited") {
+      setMsg("Camera access is off. Allow it in the phone settings, or paste the address below.", "err");
+      return "";
+    }
+  } catch {
+    setMsg("Couldn’t open the camera. Paste the address below instead.", "err");
+    return "";
+  }
+  setMsg("");
+  return new Promise((resolve) => {
+    let finished = false;
+    const ui = document.createElement("div");
+    ui.id = "scanui";
+    ui.innerHTML = `<div class="frame"></div><p>Point at the QR code on a sensor’s Share tab on sensors.social</p>
+      <button class="btn outline sm" id="scan-cancel">Cancel</button>`;
+    const done = async (raw) => {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener("popstate", onBack);
+      await BS.removeAllListeners().catch(() => {});
+      await BS.stopScan().catch(() => {});
+      document.documentElement.classList.remove("scanning");
+      ui.remove();
+      resolve(raw || "");
+    };
+    const onBack = () => done("");
+    ui.querySelector("#scan-cancel").onclick = () => done("");
+    window.addEventListener("popstate", onBack);
+    document.body.appendChild(ui);
+    document.documentElement.classList.add("scanning");
+    // Listener registration is not awaited before the camera: on some builds its promise settles late,
+    // and the preview must not wait for it (events go to whatever is registered by then).
+    const listening = Promise.all([
+      BS.addListener("barcodesScanned", (e) => { const raw = e?.barcodes?.[0]?.rawValue; if (raw) done(raw); }),
+      BS.addListener("scanError", () => { setMsg("Couldn’t read the code. Try again, or paste the address below.", "err"); done(""); }),
+    ]).catch(() => {});
+    Promise.race([listening, new Promise((r) => setTimeout(r, 1000))])
+      .then(() => (finished ? null : BS.startScan({ formats: ["QR_CODE"] })))
+      .catch((e) => { console.warn("startScan:", e); setMsg("Couldn’t open the camera. Paste the address below instead.", "err"); done(""); });
+  });
 }
 
 /* ---------- Altruist setup ---------- */
@@ -680,7 +793,9 @@ async function renderDevice(id, tok) {
           <span class="v"><span class="num">${fmt(k, v)}</span><span>${esc(unitOf(k))}</span></span>${scaleHTML(k, rec.data[k])}</button>`;
       });
       const title = heroKeys.length > 1 ? "Particulate matter" : PARAMS[heroKeys[0]].long || labelOf(heroKeys[0]);
-      h.innerHTML = `<div class="top"><span>${esc(title)}</span>${heroKeys.length > 1 ? zoneWord(zAll) : ""}</div>
+      // One value (CO₂ on Insight): title and zone sit in the card's top row, the column drops its own.
+      if (heroKeys.length === 1) h.classList.add("single");
+      h.innerHTML = `<div class="top"><span>${esc(title)}</span>${zoneWord(zAll)}</div>
         <div class="hero-cols${heroKeys.length > 1 ? " two" : ""}">${cols.join("")}</div>`;
       h.querySelectorAll(".hero-col").forEach((c) => (c.onclick = () => nav(`#/s/${encodeURIComponent(id)}/${c.dataset.k}`)));
       $("#hero").appendChild(h);

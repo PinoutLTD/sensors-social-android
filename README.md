@@ -59,6 +59,16 @@ Permissions in the APK: internet, notifications, plus WorkManager's wake lock / 
 
 Google code scanner (`@capacitor-mlkit/barcode-scanning` `scan()`, Play services UI, no camera
 permission). Back in the scanner arrives as "Failed to scan code" and is treated as a cancel.
+Phones without Google Play services (GrapheneOS) cannot load it ("ModuleInstall.API is not
+available"), so they scan with the app's own camera: `startScan()` with the ML Kit model bundled in
+the APK, the preview behind a transparent WebView, our frame and Cancel on top. The CAMERA
+permission is asked only then.
+
+## Names instead of addresses
+
+The "Name or address" field takes what the map shows: a sensor's two-word name (Auburn Horseradish)
+or an owner's (Slender Scorpion), or a pasted address. Names come from `names.js` (same dictionary and
+salt as the map), matched against the sensors seen in the last 24 h; suggestions appear while typing.
 `android/variables.gradle` pins ML Kit barcode 17.3.0 and CameraX 1.4.2 — older ones ship `.so`
 files not aligned to 16 KB pages, and Android 15+ shows a compatibility warning.
 

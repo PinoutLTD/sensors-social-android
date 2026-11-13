@@ -293,3 +293,29 @@ ol.nums li > span { width: 28px; height: 28px; flex-shrink: 0; border-radius: 14
 .app-foot p { margin: 2px 0; }
 .app-foot a { color: var(--blue2); text-decoration: none; }
 @media (prefers-color-scheme: dark) { .app-foot a { color: var(--blue); } }
+
+/* One hero value: the card's top row carries its name and zone, the column would repeat both. */
+.hero.single .hc-top { display: none; }
+
+/* Own-camera QR scanning: the preview is behind the WebView, so the page goes transparent. */
+html.scanning, html.scanning body { background: transparent !important; }
+html.scanning #app, html.scanning body::before { visibility: hidden; }
+#scanui {
+  position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 24px; padding: 24px; color: #fff; text-align: center;
+}
+#scanui .frame {
+  width: min(70vw, 280px); aspect-ratio: 1; border: 3px solid #fff; border-radius: 20px;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45);
+}
+#scanui p { margin: 0; max-width: 300px; font-weight: 600; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
+#scanui .btn { position: absolute; bottom: calc(env(safe-area-inset-bottom) + 32px); }
+
+/* Name suggestions under the "Name or address" field */
+.sugg { display: flex; flex-direction: column; margin-top: 8px; }
+.sugg:empty { display: none; }
+.sugg-item {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 12px 4px;
+  border: 0; border-top: 1px solid var(--line); background: none; color: var(--text); text-align: left; font-size: 16px;
+}
+.sugg-item small { color: var(--muted); font-size: 13px; flex-shrink: 0; }

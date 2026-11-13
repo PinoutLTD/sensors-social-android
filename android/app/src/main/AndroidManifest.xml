@@ -39,6 +39,9 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Only for scanning a QR code on phones without Google Play services; asked when used. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- only for "Use my location" in Altruist setup; asked when the button is tapped -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
