@@ -30,6 +30,12 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
+/* Since targetSdk 35 the app draws under a transparent status bar; without this strip the
+   page scrolls under the clock and icons. Height comes from the inset Capacitor passes in. */
+body::before {
+  content: ""; position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  height: env(safe-area-inset-top); background: var(--bg); pointer-events: none;
+}
 body {
   font: 400 16px/1.4 "Roboto Flex", system-ui, sans-serif;
   padding: calc(env(safe-area-inset-top) + 16px) calc(env(safe-area-inset-right) + 20px) calc(env(safe-area-inset-bottom) + 24px) calc(env(safe-area-inset-left) + 20px);
