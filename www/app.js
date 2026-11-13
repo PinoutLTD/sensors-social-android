@@ -797,7 +797,7 @@ async function renderDevice(id, tok) {
       if (heroKeys.length === 1) h.classList.add("single");
       h.innerHTML = `<div class="top"><span>${esc(title)}</span>${zoneWord(zAll)}</div>
         <div class="hero-cols${heroKeys.length > 1 ? " two" : ""}">${cols.join("")}</div>`;
-      h.querySelectorAll(".hero-col").forEach((c) => (c.onclick = () => nav(`#/s/${encodeURIComponent(id)}/${c.dataset.k}`)));
+      h.querySelectorAll(".hero-col").forEach((c) => (c.onclick = () => openParam(id, c.dataset.k)));
       $("#hero").appendChild(h);
     }
     const tiles = $("#tiles");
@@ -817,7 +817,7 @@ async function renderDevice(id, tok) {
         if (offline) t.classList.add("is-stale");
         t.innerHTML = `<div class="t-top"><span>${esc(labelOf(k))}</span>${zoneWord(z)}</div>
           <div class="t-val"><span class="num">${fmt(k, v)}</span><span>${esc(unitOf(k))}${extra}</span></div>`;
-        t.onclick = () => nav(`#/s/${encodeURIComponent(id)}/${encodeURIComponent(k)}`);
+        t.onclick = () => openParam(id, k);
       }
       tiles.appendChild(t);
     }
@@ -828,6 +828,12 @@ async function renderDevice(id, tok) {
 
 /* ---------- parameter ---------- */
 let period = "24h";
+/** A chart opened from the device screen starts at 24 h: the period chosen last time stays only
+ * while the user is on this chart, a 30-day load should not greet them on the next sensor. */
+function openParam(id, key) {
+  period = "24h";
+  nav(`#/s/${encodeURIComponent(id)}/${encodeURIComponent(key)}`);
+}
 
 async function renderParam(id, key, tok) {
   const p = PARAMS[key] || {};
@@ -837,7 +843,7 @@ async function renderParam(id, key, tok) {
     <div class="p-big"><span class="num" id="cur">—</span><span>${esc(unitOf(key))}</span></div>
     <span id="badge">${chipHTML(null, "…")}</span>
     <div class="seg" id="seg" role="tablist" aria-label="Period">${Object.keys(PERIODS).map((k) => `<button role="tab" data-p="${k}" aria-selected="${k === period}">${k === "24h" ? "24 h" : k === "7d" ? "7 days" : "30 days"}</button>`).join("")}</div>
-    <figure class="card chart-box" style="margin:0"><div class="chart-read" id="read"><span>&nbsp;</span></div><div id="chart"><p class="loading">Loading…</p></div></figure>
+    <figure class="card chart-box" style="margin:0"><div class="chart-read" id="read"><span>&nbsp;</span></div><div id="chart"><p class="loading">${period === "24h" ? "Loading…" : `Loading ${period === "7d" ? "7" : "30"} days of readings — a few seconds…`}</p></div></figure>
     <div class="stats" id="stats"></div>
     <div class="legend" id="legend"></div>
     <p class="note">${p.note ? esc(p.note) + " " : ""}${ZONES[key]?.about ? esc(ZONES[key].about) + " " : ""}Raw readings, not corrected for humidity. Ratings follow the sensors.social map.</p>`;
