@@ -64,13 +64,14 @@ files not aligned to 16 KB pages, and Android 15+ shows a compatibility warning.
 
 ## Build
 
-JDK 17 and Android SDK live in the home dir, no root:
+Capacitor 8, targetSdk/compileSdk 36 (required by Google Play from 31 Aug 2026), minSdk 24.
+JDK 21, Node 22 and Android SDK (platform 36, build-tools 36) live in the home dir, no root:
 
-    export JAVA_HOME=~/opt/jdk-17.0.21+9 PATH=~/opt/jdk-17.0.21+9/bin:$PATH ANDROID_HOME=~/Android/Sdk
+    export JAVA_HOME=~/opt/jdk-21.0.13+9 PATH=~/opt/jdk-21.0.13+9/bin:~/opt/node/bin:$PATH ANDROID_HOME=~/Android/Sdk
     npm install && npm run apk
     # → android/app/build/outputs/apk/debug/app-debug.apk
 
-Release build: `cd android && ./gradlew assembleRelease`. It is signed only when
+Release build: `cd android && ./gradlew assembleRelease` (APK) or `bundleRelease` (AAB for Google Play). It is signed only when
 `~/.android-keys/sensors-social-release.properties` (storeFile, storePassword, keyAlias, keyPassword)
 exists — the key is never in this repo. Every update must be signed with the same key.
 

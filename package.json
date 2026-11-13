@@ -1,6 +1,6 @@
 {
   "name": "sensors-social-android",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "private": true,
   "description": "Android shell for sensors.social: open a sensor or an owner by address",
   "scripts": {
@@ -8,13 +8,13 @@
     "apk": "cap sync android && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
-    "@capacitor-mlkit/barcode-scanning": "^6.2.0",
-    "@capacitor/android": "^6.2.0",
-    "@capacitor/app": "^6.0.2",
-    "@capacitor/browser": "^6.0.6",
-    "@capacitor/core": "^6.2.0"
+    "@capacitor-mlkit/barcode-scanning": "^8.2.2",
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/browser": "^8.0.0",
+    "@capacitor/core": "^8.0.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.2.0"
+    "@capacitor/cli": "^8.0.0"
   }
 }
